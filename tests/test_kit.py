@@ -409,7 +409,10 @@ class TestScoringChain(unittest.TestCase):
         r = linkedin_score.score(text, self.market, self.record)
         self.assertSchema(r, "linkedin")
         sec = linkedin_score.split_profile(text)
-        self.assertIn("Software Engineer", sec["headline"])
+        self.assertIn("Software Developer", sec["headline"])
+        # the kit's own templates agree with each other
+        self.assertFalse([c["check"] for c in r["checks"] if not c["pass"] and c["section"] in ("Headline", "Filters", "Experience")])
+        self.assertTrue(all(c["pass"] for c in r["checks"] if c["check"].startswith("Every listed skill")))
         self.assertTrue(all(all(x.startswith("LinkedIn ") for x in v) for v in r["skill_evidence"].values()))
         empty = linkedin_score.score("Headline: Hi", self.market, self.record)
         self.assertLess(empty["score"], r["score"])
@@ -616,3 +619,247 @@ class TestDeckM7Funnel(unittest.TestCase):
         rows.append(dict(rows[0], id="2", stage="screen", stage_date="2026-11-03", pm_fix="", pm_date=""))
         md = funnel.build_report(rows, None, at=dt.datetime(2026, 11, 6))
         self.assertIn("upward movement, keep it", md)
+
+
+class TestOnetCsvLayout(unittest.TestCase):
+    """Release 31.0 dropped the text files: CSV, new file names, new column names."""
+
+    CSV = ("O*NET-SOC Code,Title,Workplace Example,Element ID,Element Name,Hot Technology,In Demand\n"
+           "15-1252.00,Software Developers,Python,2.E.7.a,Development software,Y,Y\n"
+           '15-1252.00,Software Developers,"Hypertext markup language HTML",2.E.7.a,Web software,Y,Y\n')
+
+    def test_reads_the_csv_columns(self):
+        o = onet.Onet(version="31_0")
+        o._cache["Technology Skills.txt"] = onet.parse_tsv(self.CSV, delimiter=",")
+        ts = o.technology_skills("15-1252.00")
+        self.assertEqual([t["skill"] for t in ts], ["Python", "Hypertext markup language HTML"])
+        self.assertTrue(ts[0]["hot"] and ts[0]["in_demand"])
+        d, vocab = demand.build_demand(ts, [], top=25)
+        self.assertEqual({x.skill for x in d}, {"Python", "HTML"})  # a resume that says "HTML" matches
+
+    def test_urls_and_version_follow_the_release(self):
+        self.assertTrue(onet._file_url("31_0", "Technology Skills.txt").endswith("db_31_0_csv/software_skills.csv"))
+        self.assertTrue(onet._file_url("30_2", "Technology Skills.txt").endswith("db_30_2_text/Technology%20Skills.txt"))
+        with mock.patch.object(onet, "fetch", return_value='<a href="/dl_files/database/db_31_0_csv/x.csv">'), \
+                mock.patch.dict(onet.os.environ, {}, clear=True):
+            self.assertEqual(onet.latest_version(), "31_0")
+
+    def test_ties_at_the_cut_are_kept(self):
+        rows = [{"skill": f"Tool{i:02d}", "category": "", "hot": True, "in_demand": True} for i in range(30)]
+        d, _ = demand.build_demand(rows, [], top=25)
+        self.assertEqual(len(d), 30)  # the alphabet doesn't decide who is in the lane
+
+
+class TestMatcherAndNumbers(unittest.TestCase):
+    def test_plain_english_is_not_a_skill(self):
+        v = lexicon.CURATED
+        for line in ("Held a Secret security clearance", "Mentored the rest of the team", "Managed 12 insurance agents",
+                     "Quick to react under pressure", "Swift delivery of container shipments", "https://github.com/me"):
+            self.assertEqual(lexicon.find_skills(line, v), set(), line)
+        found = lexicon.find_skills("REST APIs in Go, React and Docker; HTML, CSS, application security", v)
+        self.assertTrue({"REST APIs", "Go", "React", "Docker", "HTML", "CSS", "Security"} <= found)
+
+    def test_a_number_is_a_quantity(self):
+        for t in ("cut 40%", "10,000 requests", "$2M saved", "3x faster", "p95 under 120 ms"):
+            self.assertTrue(lexicon.has_number(t), t)
+        for t in ("Stored files in S3", "OAuth2 on EC2", "on call 24/7", "HTML5 and K8s"):
+            self.assertFalse(lexicon.has_number(t), t)
+
+    def test_onet_names_get_the_short_alias(self):
+        v = lexicon.build_vocab(["Extensible markup language XML2", "Atlassian Confluence", "Oracle PeopleSoft software"])
+        self.assertIn("Atlassian Confluence", lexicon.find_skills("Wrote runbooks in Confluence", v))
+        self.assertIn("Oracle PeopleSoft software", lexicon.find_skills("PeopleSoft admin", v))
+
+
+class TestResumeScoreRules(unittest.TestCase):
+    RESUME = ("Jane Doe\njane@example.com\n\nExperience\nEngineer, Acme, Jan 2023 - Present\n"
+              "- Built a Python service on Kubernetes that cut deploy time\n  by 40% for the whole team\n"
+              "- Stored files in S3 using Terraform\n"
+              "Developer, Beta, Jun 2019 - Dec 2021\n- Tuned Kafka pipelines, cutting lag by 60%\n\n"
+              "Skills\nPython, Docker\n\nEducation\nBS, State U\n" + "filler word " * 80)
+
+    def grades(self, now):
+        import resume_score as rs
+        import screen_grade as sg
+        v = lexicon.build_vocab()
+        lines = sg.sections(self.RESUME)
+        spans = rs.role_spans(lines, now)
+        return {k: rs.grade_skill(k, v, lines, spans, now)[0] for k in ("Python", "Kubernetes", "Terraform", "Apache Kafka", "Docker")}
+
+    def test_wrapped_bullet_digits_in_names_and_stale_by_month(self):
+        import datetime as dt
+        g = self.grades(dt.date(2026, 11, 10))
+        self.assertEqual(g["Python"], "proven")       # the number is on the wrapped second line
+        self.assertEqual(g["Kubernetes"], "proven")
+        self.assertEqual(g["Terraform"], "applied")   # the 3 in S3 is not a number
+        self.assertEqual(g["Docker"], "listed")
+        self.assertEqual(g["Apache Kafka"], "proven")  # ended Dec 2021: not yet five years ago
+        self.assertEqual(self.grades(dt.date(2027, 1, 15))["Apache Kafka"], "stale")
+
+    def test_score_counts_the_best_n_and_no_phone_still_scores(self):
+        import resume_score as rs
+        rows = [{"skill": n, "category": "", "hot": True, "in_demand": True} for n in
+                ("Python", "Kubernetes", "Terraform", "Java", "C#", "Angular", "Azure", "Go")]
+        r = rs.score(self.RESUME, rows, [], now=2026, need=2)
+        self.assertIsNotNone(r["score"])               # no phone: a fix on the report, not a block
+        self.assertIn("Phone", [c["check"] for c in r["checks"] if not c["pass"]])
+        self.assertEqual(r["text_score"], 100)         # two skills proven on paper, two asked for
+        self.assertEqual(r["score"], 70)               # nothing outside backs them yet
+        self.assertEqual(rs.score(self.RESUME, rows, [], now=2026, need=8)["text_score"], 34)
+        self.assertEqual(rs.best_n([(1, 1.0), (1, 0.7), (1, 0)], None), 100 * 1.7 / 3)
+
+    def test_order_is_judged_per_section_and_plural_tests_count(self):
+        import screen_grade as sg
+        text = docs.read_text(str(FIX / "screen_resume.txt"))  # a 2025 project sits under a 2020 job
+        order = [f for f in sg.format_checks(text, sg.sections(text)) if f["rule"].startswith("Reverse")][0]
+        self.assertTrue(order["ok"])
+        swapped = self.RESUME.replace("Jan 2023 - Present", "Jan 2018 - Dec 2018")
+        order = [f for f in sg.format_checks(swapped, sg.sections(swapped)) if f["rule"].startswith("Reverse")][0]
+        self.assertFalse(order["ok"])
+        v = lexicon.build_vocab()
+        self.assertIn("Testing", lexicon.find_skills("runs unit and integration tests on every pull request", v))
+        self.assertIn("Testing", lexicon.find_skills("Added automated tests", v))
+        self.assertNotIn("Testing", lexicon.find_skills("Ran usability tests with customers", v))
+
+    def test_bad_input_is_refused_before_any_pull(self):
+        import resume_score as rs
+        with tempfile.TemporaryDirectory() as d:
+            resume = pathlib.Path(d) / "r.txt"
+            resume.write_text(self.RESUME)
+            base = ["--resume", str(resume), "--onet", "15-1252.00"]
+            with mock.patch.object(rs.onet_mod, "Onet", side_effect=AssertionError("pulled before checking input")):
+                self.assertEqual(rs.main(base + ["--github", str(pathlib.Path(d) / "missing.json")]), 2)
+                self.assertEqual(rs.main(base + ["--postings", str(pathlib.Path(d) / "nodir")]), 2)
+                self.assertEqual(rs.main(base + ["--md", str(ROOT / "leak.md")]), 2)  # the report quotes the resume
+                with self.assertRaises(SystemExit):
+                    rs.main(base + ["--need", "0"])
+        self.assertFalse((ROOT / "leak.md").exists())
+
+    def test_gate_reads_the_resume_alone(self):
+        import scorecard
+        r = {"surface": "resume", "score": 65, "text_score": 90, "checks": [], "skills": []}
+        self.assertTrue(scorecard.composite({"resume": r})["gate"]["passed"])
+
+
+class TestScreenGradeFixes(unittest.TestCase):
+    def setUp(self):
+        import screen_grade
+        self.sg = screen_grade
+        self.quals = screen_grade.split_posting("Software Engineer", (FIX / "screen_posting.txt").read_text())
+        self.resume = str(FIX / "screen_resume.txt")
+
+    def grades(self, quotes):
+        return {"grades": [{"id": q["id"], "met": q["id"] in quotes, "evidence": quotes.get(q["id"], "")}
+                           for q in self.quals["basic"] + self.quals["preferred"]]}
+
+    def test_html_posting_keeps_its_lines(self):
+        html = ("<p>About us</p><h3>Requirements</h3><ul><li>5+ years of Python</li><li>Experience with AWS</li></ul>"
+                "<h3>Nice to have</h3><ul><li>Kubernetes</li></ul>")
+        q = self.sg.split_posting("Software Engineer", postings.html_to_text(html))
+        self.assertEqual((len(q["basic"]), len(q["preferred"])), (2, 1))
+        curly = self.sg.split_posting("Eng", "What you\u2019ll bring\n- Python in production\n- SQL\n")
+        self.assertEqual(len(curly["basic"]), 2)  # job boards write the apostrophe curly
+
+    def test_an_empty_quote_is_not_a_quote(self):
+        text = (FIX / "screen_resume.txt").read_text()
+        for quote in ("", "...", " ... ", "a"):
+            self.assertFalse(self.sg.quote_found(quote, text), quote)
+
+    def test_refuses_a_quote_that_names_the_wrong_skill(self):
+        r = self.sg.grade(self.resume, self.quals, self.grades({"B4": "Designed PostgreSQL schemas and SQL reports used by 12 analysts"}), None)
+        self.assertTrue(any("B4" in m and "CI/CD" in m for m in r["refused"]))
+        ok = self.sg.grade(self.resume, self.quals, self.grades({"B4": "Wrote the GitHub Actions CI/CD pipeline"}), None)
+        self.assertNotIn("refused", ok)
+
+    def test_two_graders_agreement(self):
+        a = self.grades({q["id"]: "x" for q in self.quals["basic"]})
+        b = self.grades({q["id"]: "x" for q in self.quals["basic"][:-1]})
+        same = self.sg.agreement(self.quals, a, a)
+        self.assertTrue(same["ok"] and same["agreement"] == 1.0)
+        diff = self.sg.agreement(self.quals, a, b)
+        self.assertEqual(diff["letters"], ["B", "C"])
+        self.assertEqual(diff["differ"], [self.quals["basic"][-1]["id"]])
+        self.assertFalse(diff["ok"])
+
+    def test_composite_reports_the_screen_grade(self):
+        import scorecard
+        g = self.sg.grade(self.resume, self.quals, self.grades({"B2": "Designed PostgreSQL schemas and SQL reports used by 12 analysts"}), None)
+        c = scorecard.composite({"linkedin": {"surface": "linkedin", "score": 80, "checks": []}},
+                                screens=[scorecard.screen_summary(g, "screen.json")])
+        self.assertEqual(c["screens"][0]["grade"], "D")
+        self.assertTrue(c["screens"][0]["flag"])
+        self.assertIn("Screen Grade", scorecard.composite_md(c))
+        self.assertTrue(scorecard.plan(c)["screen_fixes"])
+        with self.assertRaises(ValueError):
+            scorecard.screen_summary({"surface": "resume"}, "x.json")
+
+
+class TestLinkedInParsing(unittest.TestCase):
+    def test_a_sentence_is_not_a_heading(self):
+        import linkedin_score
+        s = linkedin_score.split_profile("Headline: Dev\nAbout:\nI build APIs.\nExperience with Kubernetes is my strength.\n"
+                                         "Skills I use daily include Python.\nExperience:\nDev, Co, 2024 - Present\n")
+        self.assertIn("Experience with Kubernetes", s["about"])
+        self.assertEqual(s["experience"], "Dev, Co, 2024 - Present")
+        self.assertNotIn("skills", s)
+
+    def test_pdf_reading_order_and_skipped_checks(self):
+        import linkedin_score
+        from jobdata import market
+        pdf = ("Contact\njane@example.com\nwww.linkedin.com/in/jane (LinkedIn)\nTop Skills\nPython\nFastAPI\n"
+               "Certifications\nAWS Certified Developer\nJane Doe\nSoftware Developer · Python, FastAPI\n"
+               "Atlanta, Georgia, United States\nSummary\nI build services.\nExperience\nExample Co\nSoftware Developer\n"
+               "January 2024 - Present\nCut latency 40% with Redis\nPage 1 of 2\nEducation\nExample University\n")
+        s = linkedin_score.split_profile(pdf)
+        self.assertEqual(s["headline"], "Software Developer · Python, FastAPI")
+        self.assertEqual(s["location"], "Atlanta, Georgia, United States")
+        self.assertEqual(s["certifications"], "AWS Certified Developer")
+        self.assertNotIn("Page 1", s["experience"])
+        mkt = {"skills": [("Python", 1.0)], "vocab": lexicon.build_vocab(), "source": "test"}
+        names = lambda r: {c["check"] for c in r["checks"]}
+        from_pdf = linkedin_score.score(pdf, mkt, from_pdf=True)
+        self.assertEqual(from_pdf["skipped"], ["Featured", "Open to Work"])
+        self.assertNotIn("Featured has links", names(from_pdf))
+        self.assertIn("Featured has links", names(linkedin_score.score(pdf, mkt)))
+
+
+class TestPortfolioAudit(unittest.TestCase):
+    def test_client_rendered_site_is_named_not_failed_wholesale(self):
+        import portfolio_audit
+        spa = '<html lang="en"><head><title>Jane Doe</title></head><body><div id="root"></div><script src="/app.js"></script></body></html>'
+        with mock.patch.object(portfolio_audit, "fetch", return_value=spa):
+            res, notes = portfolio_audit.audit_site("https://jane.dev")
+        by = {c["check"]: c["pass"] for c in res}
+        self.assertFalse(by["Content is in the HTML, readable without JavaScript"])
+        self.assertNotIn("Links to GitHub", by)
+        self.assertTrue(notes)
+
+    def test_site_is_checked_against_the_record_and_script_text_is_ignored(self):
+        import portfolio_audit
+        page = ('<html lang="en"><head><title>Jane Doe</title><script>var tests = "ci/cd";</script></head><body><h1>Jane, developer</h1>'
+                + "<p>" + "I build backend services for logistics teams. " * 10 + "</p>"
+                '<p>See my testimonials.</p><a href="https://github.com/jane">GitHub</a></body></html>')
+
+        def fake(url, **kw):
+            if "robots" in url or "sitemap" in url or "dead" in url:
+                raise portfolio_audit.FetchError("404")
+            return page
+
+        record = {"artifacts": [{"name": "rag-eval-harness", "depth": 3, "url": "https://jane.dev/dead"},
+                                {"name": "local-toy", "depth": 1}]}
+        with mock.patch.object(portfolio_audit, "fetch", side_effect=fake):
+            res, _ = portfolio_audit.audit_site("https://jane.dev", record)
+        by = {c["check"]: c["pass"] for c in res}
+        self.assertFalse(by["Mentions tests, CI or evals"])  # "testimonials" and inline script text don't count
+        self.assertFalse(by["rag-eval-harness is on the site"])
+        self.assertFalse(by["rag-eval-harness: live link loads"])
+        self.assertNotIn("local-toy is on the site", by)
+
+    def test_checklist_items_need_a_quote(self):
+        import portfolio_audit
+        ok = portfolio_audit.checklist_checks([{"section": "First Impression", "item": "Says what you build", "pass": True,
+                                                "quote": "I build backend services"}])
+        self.assertTrue(ok[0]["pass"])
+        with self.assertRaises(ValueError):
+            portfolio_audit.checklist_checks([{"section": "First Impression", "item": "Says what you build", "pass": True}])
+

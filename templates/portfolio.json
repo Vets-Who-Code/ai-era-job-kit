@@ -29,7 +29,7 @@
       "url": "https://yourname.dev/projects/rag-eval-harness",
       "repo": "https://github.com/you/rag-eval-harness",
       "depth": 3,
-      "skills": ["Python", "FastAPI", "RAG", "pgvector", "Evals", "CI/CD", "Docker"],
+      "skills": ["Python", "FastAPI", "PostgreSQL", "RAG", "pgvector", "Evals", "CI/CD", "Docker"],
       "evidence": ["tests + CI badge", "eval report", "ADR-001 vector store choice", "architecture diagram"],
       "case_study": "case-studies/rag-eval-harness.md"
     }

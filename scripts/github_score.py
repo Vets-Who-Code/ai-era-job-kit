@@ -2,7 +2,9 @@
 """GitHub score: step 3 of the scoring chain.
 
 Reads your public GitHub the way any tool can: the GitHub REST API, no account, no token, no agreement
-(60 requests an hour; one run uses about 20). See references/sources.md.
+(60 requests an hour; one run uses about 20). See references/sources.md. That limit is per IP address,
+so a shared network shares it. If you hit it, wait an hour or set GITHUB_TOKEN (any token, no scopes
+needed; `export GITHUB_TOKEN=$(gh auth token)` works) for 5,000 an hour. The data read is the same.
 
   python3 github_score.py --user yourhandle --repos repo-a,repo-b --market resume-score.json \\
       [--portfolio <repo>/portfolio.json] [--json github-score.json] [--md github-score.md]
@@ -28,6 +30,7 @@ import argparse
 import base64
 import datetime as dt
 import json
+import os
 import pathlib
 import re
 import sys
@@ -50,10 +53,12 @@ class GitHub:
 
     def __init__(self):
         self.calls = 0
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        self.headers = dict(HDR, Authorization=f"Bearer {token}") if token else HDR
 
     def get(self, path: str):
         self.calls += 1
-        return fetch_json(API + path, headers=HDR, retries=2)
+        return fetch_json(API + path, headers=self.headers, retries=2)
 
     def try_get(self, path: str):
         try:
@@ -177,6 +182,9 @@ def main(argv=None) -> int:
         r = score(GitHub(), a.user, [x.strip() for x in a.repos.split(",") if x.strip()], market, record)
     except FetchError as e:
         print(f"STOPPED: {e}", file=sys.stderr)
+        if re.search(r"\b(403|429)\b", str(e)):
+            print("GitHub allows 60 keyless requests an hour per IP address, shared across a network. "
+                  "Wait an hour, or set GITHUB_TOKEN (export GITHUB_TOKEN=$(gh auth token)) and rerun.", file=sys.stderr)
         return 3
     except (OSError, ValueError) as e:
         print(f"REFUSED: {e}", file=sys.stderr)

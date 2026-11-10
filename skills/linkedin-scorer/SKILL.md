@@ -14,7 +14,8 @@ description: "Step 2 of the scoring chain. Scores a LinkedIn profile (pasted tex
 - The JSON carries `skill_evidence`: lane skills shown in Experience, Projects or Featured (not the Skills list). Step 1 and the composite use it to confirm a resume skill as proven.
 
 ## Run it
-1. Paste the profile into a copy of `$KIT/templates/linkedin-profile.txt` (or save the profile as PDF from LinkedIn).
+1. Paste the profile into a copy of `$KIT/templates/linkedin-profile.txt` (or save the profile as PDF from LinkedIn: More, then Save to PDF; needs `pdftotext`).
+   The PDF leaves out Featured and Open to Work and lists only the top skills, so those two checks are skipped and the report says so. For a full score, use the pasted template.
 2. `python3 $KIT/scripts/linkedin_score.py --profile linkedin.txt --market resume-score.json --portfolio <repo>/portfolio.json --resume <file> --json linkedin-score.json --md linkedin-score.md`
    (No step 1 file? `--onet <code>` pulls O*NET live.)
 3. Report the score and the top five fixes, highest weight first. The weights are a VWC rubric; LinkedIn publishes no ranking.

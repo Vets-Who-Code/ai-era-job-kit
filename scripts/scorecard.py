@@ -6,7 +6,7 @@
       --github github-score.json --portfolio portfolio-score.json [--sync sync.md] \\
       [--machine-weights resume=40,linkedin=35,github=15,portfolio=10] \\
       [--human-weights portfolio=35,github=30,resume=20,linkedin=15] [--gate 70] \\
-      [--json composite.json] [--md composite.md]
+      [--screen screen.json ...] [--json composite.json] [--md composite.md]
 
   # Step 6: the steps to improve each section, biggest gain first
   python3 scorecard.py plan --composite composite.json [--md plan.md]
@@ -19,8 +19,13 @@ Two reads, because two kinds of reader see you in order:
     literally: titles, keywords, dates, structure, match to the posting.
   - Human read (recruiter, hiring manager, engineers): portfolio 35, GitHub 30, resume 20, LinkedIn 15.
     People skim for proof: a live demo, real impact, a clear story, recent commits.
-  - Resume gate: a resume score under the gate (default 70), or a resume that fails the parse gate, is
-    flagged whatever either total says. A weak resume means no human ever sees the rest.
+  - Resume gate: a resume that scores under the gate (default 70) on its own text, or that fails the
+    parse gate, is flagged whatever either total says. A weak resume means no human ever sees the rest.
+    The gate reads text_score (the resume alone), because the gate is about the file a screener parses.
+  - Screen Grades (screen_grade.py grade --out) are the one score modeled on vendor documents. They are
+    per posting, so they sit beside the two reads with no invented weight; a C or D is flagged.
+  - The LinkedIn and GitHub share of the machine read rests on a chat-only claim (references/ats-research.md):
+    no vendor documents which systems score them. The report says so and shows the resume alone beside it.
 These weights and the gate are a VWC design judgment (chosen Nov 6 2026), not research and not any
 employer's. Employers don't publish theirs. Change them with --machine-weights, --human-weights and --gate.
 A missing surface is left out of both reads and the rest are reweighted; the report says the scores are partial.
@@ -101,14 +106,24 @@ def resume_gate(surfaces: dict[str, dict], threshold: float) -> dict:
     if r.get("score") is None:
         return {"threshold": threshold, "resume_score": None, "passed": False,
                 "note": "The resume failed the parse gate. A screener can't read it, so no human sees the rest. Fix the format first."}
-    ok = r["score"] >= threshold
-    return {"threshold": threshold, "resume_score": r["score"], "passed": ok,
+    own = r.get("text_score", r["score"])  # the resume alone, before GitHub or LinkedIn back anything
+    ok = own >= threshold
+    return {"threshold": threshold, "resume_score": own, "passed": ok,
             "note": "Resume clears the gate." if ok else
-            f"Resume scores {r['score']}, under the gate of {threshold:g}. A weak resume means no human sees your GitHub or portfolio, whatever the totals say. Fix it first."}
+            f"Resume scores {own} on its own text, under the gate of {threshold:g}. A weak resume means no human sees your GitHub or portfolio, whatever the totals say. Fix it first."}
+
+
+def screen_summary(r: dict, path: str = "") -> dict:
+    """One Screen Grade (screen_grade.py grade --out), cut down to what the composite reports."""
+    if "grade" not in r or "rows" not in r:
+        raise ValueError(f"{path or 'file'} is not a Screen Grade report. Write one with screen_grade.py grade --out.")
+    return {"posting": (r.get("title") or {}).get("posting_title") or path, "grade": r["grade"],
+            "basic": r.get("basic", ""), "preferred": r.get("preferred", ""), "flag": r["grade"] in ("C", "D", "No grade"),
+            "not_met_basic": [x["qualification"] for x in r["rows"] if x["kind"] == "basic" and not x["met"]]}
 
 
 def composite(surfaces: dict[str, dict], weights: dict[str, dict] | None = None, sync: dict | None = None,
-              gate: float = RESUME_GATE) -> dict:
+              gate: float = RESUME_GATE, screens: list[dict] | None = None) -> dict:
     weights = weights or {k: dict(v) for k, v in READS.items()}
     res = surfaces.get("resume")
     if res and res.get("skills"):
@@ -120,7 +135,8 @@ def composite(surfaces: dict[str, dict], weights: dict[str, dict] | None = None,
     blocked = [k for k, v in surfaces.items() if v.get("score") is None]
     return {"surface": "composite", "machine": reads["machine"], "human": reads["human"],
             "gate": resume_gate(surfaces, gate), "partial": bool(missing or blocked), "missing": missing,
-            "blocked": blocked, "weights_source": WEIGHTS_SOURCE, "sync": sync, "inputs": surfaces}
+            "blocked": blocked, "weights_source": WEIGHTS_SOURCE, "sync": sync, "screens": screens or [],
+            "inputs": surfaces}
 
 
 def sync_summary(md_text: str) -> dict:
@@ -164,8 +180,10 @@ def plan(comp: dict, per_surface: int = 5) -> dict:
         fails = sorted((c for c in r.get("checks", []) if not c.get("pass") and c.get("fix")), key=lambda c: -float(c.get("weight") or 0))
         lifts = []
         if k == "resume":
+            order = ["proven", "applied", "listed", "stale", "none"]  # ties: what's already on the resume first
             lifts = [{"skill": s["skill"], "grade": s["grade"], "lift": s["lift"]}
-                     for s in sorted(r.get("skills", []), key=lambda s: -s.get("lift", 0)) if s.get("lift", 0) > 0][:per_surface]
+                     for s in sorted(r.get("skills", []), key=lambda s: (-s.get("lift", 0), order.index(s.get("grade", "none"))))
+                     if s.get("lift", 0) > 0][:per_surface]
             fails = [c for c in fails if c.get("section") != "Evidence"]  # shown once, as lift skills
         steps.append({"surface": k, "skill": skill, "how": how, "score": r["score"], "gap_points": round(gaps[k], 1),
                       "status": "scored", "gate": k == "resume" and gate_failed,
@@ -173,6 +191,8 @@ def plan(comp: dict, per_surface: int = 5) -> dict:
     sync = comp.get("sync") or {}
     return {"surface": "plan", "machine": comp["machine"]["score"], "human": comp["human"]["score"], "gate": comp["gate"],
             "partial": comp["partial"], "steps": steps, "sync_fixes": sync.get("fixes", []),
+            "screen_fixes": [f"{s['posting'] or 'posting'} (grade {s['grade']}): {q}" for s in comp.get("screens") or []
+                             for q in s["not_met_basic"]],
             "next": "Then run resume-rebuilder (step 7) and rescore the whole chain."}
 
 
@@ -193,7 +213,19 @@ def composite_md(c: dict) -> str:
             sc = {"missing": "not run", "blocked": "no score (format)"}.get(r["status"], str(r["score"]))
             L.append(f"| {NAME[r['surface']]} | {r['weight']:g} | {sc} | {'' if r['gap_points'] is None else r['gap_points']} |")
         L.append("")
+    for s in c.get("screens") or []:
+        L.append(f"- Screen Grade, {s['posting'] or 'posting'}: {s['grade']} (basic {s['basic']}, preferred {s['preferred']})"
+                 + (". FLAGGED: fix the basic qualifications not met before you apply." if s["flag"] else "."))
+    if c.get("screens"):
+        L.append("  Screen Grades follow the vendors' documented method. They are per posting, so they aren't weighted into either read.")
+        L.append("")
     L.append(f"Weights and gate: {c['weights_source']}. Not any employer's; employers don't publish theirs.")
+    res = (c.get("inputs") or {}).get("resume") or {}
+    if any(k in (c.get("inputs") or {}) for k in ("linkedin", "github")):
+        L.append("The LinkedIn and GitHub share of the machine read rests on a chat-only claim (references/ats-research.md); "
+                 "no vendor documents which systems score them." + (f" Resume alone: {res['score']} / 100." if res.get("score") is not None else ""))
+    if (c.get("inputs") or {}).get("portfolio", {}).get("judgment_pass") is False:
+        L.append("Portfolio score: automated checks only. Add the checklist pass (portfolio_audit.py --checklist) so the human read includes a human's judgment.")
     if c["missing"]:
         L.append(f"Not run: {', '.join(c['missing'])}. Both reads reweight the rest.")
     if c["sync"] is not None:
@@ -215,6 +247,8 @@ def plan_md(p: dict) -> str:
             L += [f"- {x['skill']}: now {x['grade']}, +{x['lift']} points" for x in s["lift_skills"]]
         L += [f"- {f}" for f in s["fixes"]] or ["- Nothing failing."]
         L.append("")
+    if p.get("screen_fixes"):
+        L += ["## Basic qualifications not met (per posting, fix before applying)", *[f"- {f}" for f in p["screen_fixes"]], ""]
     if p["sync_fixes"]:
         L += ["## Keep every surface in sync with portfolio.json", *[f"- {f}" for f in p["sync_fixes"]], ""]
     L.append(p["next"])
@@ -228,6 +262,7 @@ def main(argv=None) -> int:
     for k in ORDER:
         c.add_argument(f"--{k}", help=f"{k}-score.json")
     c.add_argument("--sync", help="sync_check.py markdown report")
+    c.add_argument("--screen", nargs="*", default=[], help="Screen Grade reports (screen_grade.py grade --out), one per posting")
     c.add_argument("--machine-weights", help="e.g. resume=40,linkedin=35,github=15,portfolio=10")
     c.add_argument("--human-weights", help="e.g. portfolio=35,github=30,resume=20,linkedin=15")
     c.add_argument("--gate", type=float, default=RESUME_GATE, help=f"resume score under this is flagged (default {RESUME_GATE})")
@@ -245,7 +280,8 @@ def main(argv=None) -> int:
                 raise ValueError("Give at least one of --resume, --linkedin, --github, --portfolio.")
             sync = sync_summary(pathlib.Path(a.sync).read_text()) if a.sync else None
             w = {"machine": parse_weights(a.machine_weights, "machine"), "human": parse_weights(a.human_weights, "human")}
-            out = composite(surfaces, w, sync, a.gate)
+            screens = [screen_summary(json.loads(pathlib.Path(x).read_text()), x) for x in a.screen]
+            out = composite(surfaces, w, sync, a.gate, screens)
             md = composite_md(out)
         else:
             out = plan(json.loads(pathlib.Path(a.composite).read_text()))

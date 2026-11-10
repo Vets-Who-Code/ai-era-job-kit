@@ -13,7 +13,8 @@ import subprocess
 import zipfile
 
 
-def read_text(path: str) -> str:
+def read_text(path: str, layout: bool = True) -> str:
+    """layout=False reads a PDF in reading order instead of keeping side-by-side columns side by side."""
     p = pathlib.Path(path).expanduser()
     if not p.exists():
         raise FileNotFoundError(p)
@@ -30,7 +31,7 @@ def read_text(path: str) -> str:
         exe = shutil.which("pdftotext")
         if not exe:
             raise RuntimeError("pdftotext not found. Install poppler, or save the resume as .txt or .docx.")
-        out = subprocess.run([exe, "-layout", str(p), "-"], capture_output=True, text=True, check=True)
+        out = subprocess.run([exe, *(["-layout"] if layout else []), str(p), "-"], capture_output=True, text=True, check=True)
         return out.stdout
     raise ValueError(f"Unsupported resume format: {ext}")
 

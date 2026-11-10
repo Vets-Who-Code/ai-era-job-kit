@@ -2,7 +2,9 @@
 *resume*.pdf
 *resume*.docx
 *resume*.txt
-*Resume*
+*Resume*.pdf
+*Resume*.docx
+*Resume*.txt
 funnel*.csv
 score.json
 score.md
@@ -11,3 +13,22 @@ BragDatabase/
 .friday-setup-state.json
 __pycache__/
 *.pyc
+
+# Scores and reports quote your resume
+*-score.json
+*-score.md
+composite.json
+composite.md
+plan.md
+sync.md
+screen*.json
+screen*.md
+quals*.json
+grades*.json
+linkedin*.txt
+linkedin*.pdf
+Profile.pdf
+
+# The kit's own templates and test fixtures are not personal data
+!templates/**
+!tests/fixtures/**

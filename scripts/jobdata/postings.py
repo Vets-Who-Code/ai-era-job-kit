@@ -24,6 +24,17 @@ def strip_html(s: str) -> str:
     return " ".join(html.unescape(_TAG.sub(" ", html.unescape(s or ""))).split())
 
 
+_BLOCK = re.compile(r"<\s*(?:/?(?:p|div|h[1-6]|ul|ol|tr|section|table)|br)\b[^>]*>", re.I)
+_LI = re.compile(r"<\s*li\b[^>]*>", re.I)
+
+
+def html_to_text(s: str) -> str:
+    """Plain text that keeps headings and list items on their own lines (strip_html flattens them)."""
+    s = _LI.sub("\n- ", _BLOCK.sub("\n", s or ""))
+    lines = (" ".join(html.unescape(_TAG.sub(" ", l)).split()) for l in s.splitlines())
+    return "\n".join(l for l in lines if l and l != "-")
+
+
 def load_folder(path: str) -> list[dict]:
     p = pathlib.Path(path).expanduser()
     if not p.is_dir():

@@ -6,3 +6,18 @@ brag/inbox/
 funnel*.csv
 score.json
 score.md
+
+# Scores and reports quote your resume
+*-score.json
+*-score.md
+composite.json
+composite.md
+plan.md
+sync.md
+screen*.json
+screen*.md
+quals*.json
+grades*.json
+linkedin*.txt
+linkedin*.pdf
+Profile.pdf

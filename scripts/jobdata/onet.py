@@ -1,12 +1,16 @@
 """O*NET database text files, pulled live from onetcenter.org (no key).
 
-Files used (tab-separated, header row):
+Files used, by the name they had through release 30.x (tab-separated text, header row):
   Occupation Data.txt   O*NET-SOC Code | Title | Description
   Alternate Titles.txt  O*NET-SOC Code | Alternate Title | Short Title | Source(s)
   Technology Skills.txt O*NET-SOC Code | Example | Commodity Code | Commodity Title
                         | Hot Technology (Y/N) | In Demand (Y/N)
   Skills.txt            O*NET-SOC Code | Element ID | Element Name | Scale ID (IM/LV)
                         | Data Value | ...
+
+Release 31.0 dropped the text format and renamed files and columns. From 31.0 the same tables are
+CSV: occupation_data.csv, job_titles.csv (Job Title), software_skills.csv (Workplace Example,
+Element Name), essential_skills.csv. Both layouts are read; the rest of the kit sees one shape.
 """
 
 from __future__ import annotations
@@ -24,35 +28,51 @@ DB_PAGE = f"{BASE}/database.html"
 ONLINE_SUMMARY = "https://www.onetonline.org/link/summary/{code}"
 
 
-def latest_version() -> str:
-    """Return the newest text-format release tag, e.g. '30_2'.
+CSV_FROM = 31  # first release without the text format
+CSV_NAMES = {
+    "Occupation Data.txt": "occupation_data.csv",
+    "Alternate Titles.txt": "job_titles.csv",
+    "Technology Skills.txt": "software_skills.csv",
+    "Skills.txt": "essential_skills.csv",
+}
 
-    Override with ONET_DB_VERSION=30_2 if the release page layout changes.
+
+def latest_version() -> str:
+    """Return the newest release tag on the database page, e.g. '31_0'.
+
+    Override with ONET_DB_VERSION=31_0 if the release page layout changes.
     """
     forced = os.environ.get("ONET_DB_VERSION")
     if forced:
         return forced.replace(".", "_")
     html = fetch(DB_PAGE)
-    found = re.findall(r"db_(\d+)_(\d+)_text", html)
+    found = re.findall(r"db_(\d+)_(\d+)_(?:text|csv)", html)
     if not found:
         raise FetchError(
-            "Could not find an O*NET text release on the database page. "
-            "Set ONET_DB_VERSION (for example 30_2) and rerun.")
+            "Could not find an O*NET release on the database page. "
+            "Set ONET_DB_VERSION (for example 31_0) and rerun.")
     major, minor = max((int(a), int(b)) for a, b in found)
     return f"{major}_{minor}"
 
 
+def _is_csv(version: str) -> bool:
+    m = re.match(r"(\d+)", version)
+    return bool(m) and int(m.group(1)) >= CSV_FROM
+
+
 def _file_url(version: str, name: str) -> str:
+    if _is_csv(version):
+        return f"{BASE}/dl_files/database/db_{version}_csv/{CSV_NAMES[name]}"
     return f"{BASE}/dl_files/database/db_{version}_text/{urllib.parse.quote(name)}"
 
 
 def read_table(version: str, name: str) -> list[dict]:
     text = fetch(_file_url(version, name), timeout=90)
-    return parse_tsv(text)
+    return parse_tsv(text, delimiter="," if _is_csv(version) else "\t")
 
 
-def parse_tsv(text: str) -> list[dict]:
-    reader = csv.DictReader(io.StringIO(text), delimiter="\t")
+def parse_tsv(text: str, delimiter: str = "\t") -> list[dict]:
+    reader = csv.DictReader(io.StringIO(text.lstrip("\ufeff")), delimiter=delimiter)
     return [{(k or "").strip(): (v or "").strip() for k, v in row.items()} for row in reader]
 
 
@@ -99,7 +119,7 @@ class Onet:
             alts = []
         for row in alts:
             code = _col(row, "O*NET-SOC Code")
-            hay = (_col(row, "Alternate Title") + " " + _col(row, "Short Title")).lower()
+            hay = (_col(row, "Alternate Title", "Job Title") + " " + _col(row, "Short Title")).lower()
             hits = sum(1 for w in q if w in hay)
             if hits == len(q):
                 scores[code] = scores.get(code, 0) + 1.5
@@ -122,8 +142,8 @@ class Onet:
             if _col(row, "O*NET-SOC Code") != code:
                 continue
             out.append({
-                "skill": _col(row, "Example"),
-                "category": _col(row, "Commodity Title"),
+                "skill": _col(row, "Example", "Workplace Example"),
+                "category": _col(row, "Commodity Title", "Element Name"),
                 "hot": _col(row, "Hot Technology").upper() == "Y",
                 "in_demand": _col(row, "In Demand").upper() == "Y",
             })

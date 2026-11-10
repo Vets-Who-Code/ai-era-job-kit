@@ -10,8 +10,8 @@ regenerate the rest.
       --resume ~/resumes/me-software-developer.pdf \\
       --linkedin ~/job-search/linkedin.txt --github yourhandle [--md sync.md]
 
---linkedin is a text file of your profile: copy the headline, About,
-Experience and Featured sections into it (this script never logs in).
+--linkedin is your profile as text (copy the headline, About, Experience and
+Featured sections into it) or LinkedIn's Save to PDF. This script never logs in.
 --github uses the GitHub CLI (https://cli.github.com, `gh auth login`); skip
 it to check offline.
 
@@ -171,7 +171,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--portfolio", required=True, help="portfolio.json (the master record)")
     ap.add_argument("--resume", help="resume file (.pdf, .docx, .txt, .md)")
-    ap.add_argument("--linkedin", help="text file with your LinkedIn headline, About, Experience, Featured")
+    ap.add_argument("--linkedin", help="your LinkedIn profile as text, or LinkedIn's Save to PDF")
     ap.add_argument("--github", help="GitHub username")
     ap.add_argument("--md", help="also write the report to this file")
     a = ap.parse_args(argv)
@@ -184,8 +184,12 @@ def main(argv=None) -> int:
     if not (a.resume or a.linkedin or a.github):
         ap.error("give at least one of --resume, --linkedin, --github")
     notes: list[str] = []
-    resume = docs.read_text(str(pathlib.Path(a.resume).expanduser())) if a.resume else None
-    linkedin = pathlib.Path(a.linkedin).expanduser().read_text() if a.linkedin else None
+    try:
+        resume = docs.read_text(str(pathlib.Path(a.resume).expanduser())) if a.resume else None
+        linkedin = docs.read_text(str(pathlib.Path(a.linkedin).expanduser()), layout=False) if a.linkedin else None
+    except (OSError, ValueError, RuntimeError) as e:
+        print(f"Can't read a file: {e}", file=sys.stderr)
+        return 2
     gh = None
     if a.github:
         gh, note = github_profile(a.github)

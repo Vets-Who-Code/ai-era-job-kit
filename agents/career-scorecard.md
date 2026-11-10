@@ -12,7 +12,7 @@ Inputs to ask for once: resume file, target role or O*NET code, LinkedIn profile
 2. `linkedin-scorer` with `--market resume-score.json`.
 3. `github-scorer` with `--market resume-score.json`.
 4. `portfolio-scorer` (automated pass, then the checklist pass) and the sync check to `sync.md`.
-5. `composite-scorer` on the four JSON files and `sync.md`.
+5. `composite-scorer` on the four JSON files and `sync.md`, with `--screen` for each Screen Grade written in step 1.
 6. `improvement-plan` on `composite.json`.
 7. `resume-rebuilder`: draft from the portfolio with the lift list, then `--check`.
 

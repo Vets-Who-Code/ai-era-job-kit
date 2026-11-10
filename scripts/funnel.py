@@ -24,7 +24,9 @@ channel (where you apply).
 
 Weekly loop: Friday Setup -> sync check -> funnel review -> one postmortem per loss -> reallocate.
 72-hour rule [VWC]: a fix with no upward stage movement within 72 hours was opinion, not
-tactical intelligence; try the next fix. Keep funnel.csv outside any git repository.
+tactical intelligence; try the next fix. It is a rule of thumb for keeping fixes moving, with no
+outside data behind it, and employers often take longer than 72 hours to answer. Set
+FUNNEL_MOMENTUM_HOURS to judge fixes over a longer window. Keep funnel.csv outside any git repository.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import os
 import pathlib
 import sys
 
@@ -48,7 +51,7 @@ LAYERS = {
     "defense": "Defend every line: Stack Defense Doc, story table (resume-rebuilder, final-round-panel)",
     "channel": "Reallocate effort toward the source that converts (this report, By source)",
 }
-MOMENTUM_HOURS = 72  # [VWC] the 72-hour rule
+MOMENTUM_HOURS = int(os.environ.get("FUNNEL_MOMENTUM_HOURS", "72"))  # [VWC] the 72-hour rule
 
 # No benchmark rates: the report shows only the learner's own numbers.
 
@@ -198,7 +201,9 @@ def build_report(rows: list[dict], since: str | None, at: dt.datetime | None = N
         out.append(f"- {r['company']} / {r['role']} (broke at {r.get('pm_stage') or r['stage']}): {r['pm_cause']}{fix}{layer}")
     mom = momentum_checks(rows, at)
     if mom:
-        out += ["", f"## {MOMENTUM_HOURS}-hour rule", *mom]
+        out += ["", f"## {MOMENTUM_HOURS}-hour rule", *mom,
+                f"[VWC] rule of thumb, not data: replies often take longer than {MOMENTUM_HOURS} hours. "
+                "Before dropping a fix, check that enough applications went out with it to tell."]
 
     # What to do next: one ordered stack, highest leverage first.
     nxt = []

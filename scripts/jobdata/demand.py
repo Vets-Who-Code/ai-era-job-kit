@@ -6,6 +6,7 @@ market_snapshot.py for the "Top skills" column.
 Ranking (the market prevails, the same rule as hashflag's resume-market-scorer):
     with postings     rank by share of postings that mention the skill; O*NET flags break ties
     without postings  rank by O*NET flags (In Demand, Hot Technology), and say so
+Skills tied at the cut-off all stay in: `top` is a floor, not an alphabetical cut.
 """
 
 
@@ -55,6 +56,11 @@ def build_demand(onet_rows: list[dict], postings: list[dict], top: int = 25):
         if w > 0:
             out.append(DemandSkill(skill, round(w, 4), f["hot"], f["in_demand"], round(share, 3)))
     out.sort(key=lambda d: (-d.weight, d.skill))
+    if len(out) > top:  # keep every skill tied with the last one in, so the alphabet never decides the cut
+        edge = out[top - 1].weight
+        top = max(top, sum(1 for d in out if d.weight >= edge))
+        if not postings:  # O*NET flags give only two weights: don't let a tie pull in the whole long tail
+            top = min(top, sum(1 for d in out if d.weight >= out[0].weight)) if out[0].weight > edge else top
     return out[:top], vocab
 
 

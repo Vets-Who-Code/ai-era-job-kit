@@ -9,8 +9,10 @@ description: "Step 4 of the scoring chain. Scores a portfolio site: the automate
 
 ## Run it
 1. Automated pass (leave `--github` off in the chain; step 3 scores GitHub):
-   `python3 $KIT/scripts/portfolio_audit.py --url <site> --json portfolio-score.json`
+   `python3 $KIT/scripts/portfolio_audit.py --url <site> --portfolio <repo>/portfolio.json --json portfolio-score.json`
+   It reads the home page and up to five project pages as raw HTML, checks each deployed artifact in `portfolio.json` is on the site, and loads each live link. If the site is drawn by JavaScript it says so and leaves out the checks it couldn't make; cover those in the judgment pass.
 2. Judgment pass: open the Vets Who Code Portfolio Checklist (https://vetswhocode.io/portfolio-checklist) and read each section's items on the page itself, not from memory. "The portfolio is a sales site." "You have 8 seconds."
+   Write each item you checked to `checklist.json` as `{"section", "item", "pass": true|false, "quote": "<what you saw on the page>"}`, then rerun the script with `--checklist checklist.json` so the judgment is in the score. Every item needs a quote, pass or miss; the script refuses one without.
 3. Signal match: `python3 $KIT/scripts/sync_check.py --portfolio <repo>/portfolio.json --resume <file> --linkedin <file> --github <handle> --md sync.md`. Step 5 reports it beside the score.
 4. Report the automated score, each checklist section as passed out of checked (quote what you saw for each miss), and the top five fixes, highest leverage first. Don't call it ready until it clears the checklist's Quality Bar.
 

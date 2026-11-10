@@ -1,0 +1,28 @@
+Jordan Sample
+Software Engineer
+jordan.sample@example.com | (555) 010-4477 | Austin, TX | example.dev
+
+SUMMARY
+Software engineer who builds and runs backend services in Python, with production experience on AWS and a habit of writing tests first. Veteran with 10+ years of leadership across operations and engineering teams.
+
+EXPERIENCE
+Software Engineer, Example Logistics, Jan 2022 - Present
+- Built a shipment pricing API in Python and FastAPI that serves 40,000 requests a day with p95 latency under 120 ms.
+- Moved nightly batch jobs to AWS Lambda with Terraform, cutting the compute bill 35%.
+- Wrote the GitHub Actions CI/CD pipeline that runs unit and integration tests on every pull request.
+- Designed PostgreSQL schemas and SQL reports used by 12 analysts.
+
+Junior Developer, Sample Health, Jun 2020 - Dec 2021
+- Shipped internal tools in Python and Django for a 30-person clinical operations team.
+- Added automated tests that raised coverage from 40% to 85%.
+
+PROJECTS
+rag-eval-harness, 2025 - 2025
+- Built an evaluation harness for a retrieval assistant with 200 graded test questions.
+
+EDUCATION
+Vets Who Code accelerator, Software Engineering, 2020
+B.S. Information Systems, Example State University, 2019
+
+SKILLS
+Python, SQL, FastAPI, Django, PostgreSQL, AWS, Terraform, Docker, GitHub Actions, Kubernetes

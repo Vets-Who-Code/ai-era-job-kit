@@ -21,8 +21,9 @@ Built for the *Job Hunting in the AI Era* workshop on Master.dev (formerly Front
    cp -r skills/* ~/.claude/skills/
    cp agents/*.md ~/.claude/agents/
    cp commands/*.md ~/.claude/commands/
+   cp -r scripts templates references ~/.claude/
    ```
-   Keep `scripts/` and `templates/` next to `skills/` (skills look two folders up for them), or set the path when asked.
+   The last line matters: each skill looks two folders up from itself for `scripts/`, `templates/` and `references/`, so they have to sit next to `skills/`.
 3. **Other AI tools:** each `skills/*/SKILL.md` is plain Markdown instructions; paste or load it into any assistant that supports skills or custom instructions. The scripts run anywhere Python runs.
 
 Docs: Claude Code skills https://docs.claude.com/en/docs/claude-code/skills · subagents https://docs.claude.com/en/docs/claude-code/sub-agents · plugins https://docs.claude.com/en/docs/claude-code/plugins
@@ -31,7 +32,8 @@ Docs: Claude Code skills https://docs.claude.com/en/docs/claude-code/skills · s
 
 - Python 3.10+ (standard library only, nothing to `pip install`)
 - GitHub CLI for Friday Setup: https://cli.github.com, then `gh auth login` (the GitHub scorer needs no account or token)
-- Optional: `pdftotext` (poppler) to read PDF resumes; otherwise use `.docx` or `.txt`
+- Optional: `pdftotext` (poppler) to read PDF resumes and LinkedIn's PDF; otherwise use `.docx` or `.txt`
+- Optional: `export GITHUB_TOKEN=$(gh auth token)` if the GitHub scorer hits the keyless limit (60 requests an hour per IP address, shared across a network; a run uses about 20)
 - Optional: `export JOBDATA_CONTACT=you@example.com` so data providers can reach you if your script misbehaves
 
 ## Four sources of truth
@@ -54,12 +56,12 @@ Each step is a skill with a script behind it. Steps 2 to 4 reuse step 1's `resum
 | 1 | `resume-scorer` | `resume_score.py`, `screen_grade.py` | Parse gate, lane score 0 to 100 from live O*NET and BLS, lift per skill; A to D Screen Grade per posting |
 | 2 | `linkedin-scorer` | `linkedin_score.py` | LinkedIn score: headline, location, skills, Featured, About, Experience, resume match |
 | 3 | `github-scorer` | `github_score.py` | GitHub score from the keyless REST API: profile, pinned repos, lane skills |
-| 4 | `portfolio-scorer` | `portfolio_audit.py`, `sync_check.py` | Portfolio score, the checklist pass, and the sync check |
-| 5 | `composite-scorer` | `scorecard.py composite` | Two scores: a machine read (resume 40, LinkedIn 35, GitHub 15, portfolio 10) and a human read (portfolio 35, GitHub 30, resume 20, LinkedIn 15), plus a resume gate at 70 |
+| 4 | `portfolio-scorer` | `portfolio_audit.py`, `sync_check.py` | Portfolio score (automated checks plus the checklist pass, and the site checked against `portfolio.json`), and the sync check |
+| 5 | `composite-scorer` | `scorecard.py composite` | Two scores: a machine read (resume 40, LinkedIn 35, GitHub 15, portfolio 10) and a human read (portfolio 35, GitHub 30, resume 20, LinkedIn 15), plus a resume gate at 70 and each posting's Screen Grade beside them |
 | 6 | `improvement-plan` | `scorecard.py plan` | The steps to improve each section, biggest gain first |
 | 7 | `resume-rebuilder` | `resume_rebuild.py` | Your resume rebuilt to spec from the portfolio, linted, defended, rescored |
 
-The `career-scorecard` agent runs all seven in order. Step 5 gives two scores because two kinds of reader see you in order: machines first, then people. A resume under 70 is flagged whatever the totals say, since a weak resume means no human sees the rest. The weights and the gate are a VWC design judgment, not research and not any employer's; `--machine-weights`, `--human-weights` and `--gate` change them.
+The `career-scorecard` agent runs all seven in order. Step 5 gives two scores because two kinds of reader see you in order: machines first, then people. A resume that scores under 70 on its own text is flagged whatever the totals say, since a weak resume means no human sees the rest. The weights and the gate are a VWC design judgment, not research and not any employer's; `--machine-weights`, `--human-weights` and `--gate` change them. The LinkedIn and GitHub share of the machine read rests on a chat-only claim (`references/ats-research.md`), and the report says so. The Screen Grade is the one score modeled on vendor documents; it is per posting, so the composite reports it beside the two reads without a weight.
 
 ## The course, module by module
 
@@ -78,7 +80,44 @@ No labs run during the session. Each module's take-home lab is in `TAKE-HOME.md`
 
 Run `/job-hunt` to see your next step. Shortcuts: `/score-resume`, `/mock-screen`.
 
-## Quick start (in order)
+## Start here: score your resume in 5 minutes
+
+You need Python 3.10+ and your resume as `.pdf`, `.docx` or `.txt`. Nothing to install (PDFs need `pdftotext`: `brew install poppler` on a Mac, `apt install poppler-utils` on Linux).
+
+1. **Make a work folder outside any git repo** and put your resume in it. The scripts refuse to read or write a resume inside a repo, so it can never be committed by accident.
+   ```
+   mkdir -p ~/job-search && cd ~/job-search
+   cp ~/Downloads/my-resume.pdf .
+   KIT=~/code/ai-era-job-kit        # wherever this folder lives
+   ```
+2. **Score it** against the job you want. Name the role in plain words:
+   ```
+   python3 $KIT/scripts/resume_score.py --resume my-resume.pdf --role "software developer" \
+       --json resume-score.json --md resume-score.md
+   ```
+   Prefer an exact lane? Look up the code at https://www.onetonline.org/find/ and pass `--onet 15-1252.00` instead of `--role`. Have saved job postings? Put them in a folder as `.txt` files and add `--postings postings`.
+3. **Read the report** (printed, and saved as `resume-score.md`):
+   - The score out of 100, and the title of the lane it matched. Check the title is the job you meant.
+   - The skill table. **Grade** is where each skill stands (proven, applied, listed, stale, none). **Lift** is the points you gain by proving it. Work from the top.
+   - "Format and parse fixes": do these first. They're quick, and a file the screener can't read gets no score at all.
+4. **Fix and rerun** the same command. To move a skill up, name it in an Experience or Projects bullet with a number ("cut the compute bill 35%"). Only add what you can defend.
+5. **Lint the file you'll send:** `python3 $KIT/scripts/resume_rebuild.py --check my-resume.pdf`. "Passes the spec." means it's ready.
+
+In Claude Code the same thing is one line: `/score-resume ~/job-search/my-resume.pdf "software developer"`.
+
+No skill reaches **proven** until GitHub or LinkedIn backs it, so a first score in the 50s or 60s is normal. The full chain below adds that proof.
+
+| If you see | It means | Do this |
+|---|---|---|
+| `REFUSED: keep resumes and their scores outside any git repository.` | The resume, `--json` or `--md` path is inside a repo | Run from `~/job-search` as in step 1 |
+| `REFUSED: pdftotext not found` | PDFs need poppler | Install it, or save the resume as `.docx` or `.txt` |
+| `No score: fix the format first` | The parse gate failed | Fix each row marked "no" in the table, then rerun |
+| `STOPPED: ...` | O*NET or BLS couldn't be reached | Check your connection and rerun; the kit never guesses numbers |
+| The lane title is wrong | `--role` matched a different occupation | Pass the exact code with `--onet` |
+
+## Quick start: the full chain (in order)
+
+Run these from your work folder (`~/job-search` above), with `scripts/` standing for `$KIT/scripts/`. The score files quote your resume, so they stay outside git too.
 
 1. Set up your portfolio repo as the source of truth: copy `templates/portfolio.json` and `templates/portfolio-repo/gitignore` (as `.gitignore`) into it, then start the Brag Database: `python3 scripts/friday_setup.py --portfolio ~/code/portfolio --since 2026-01-01`
 2. Save 10+ real postings for the roles you want into a `postings/` folder (optional; O*NET alone works).
@@ -86,8 +125,8 @@ Run `/job-hunt` to see your next step. Shortcuts: `/score-resume`, `/mock-screen
    Per posting: `python3 scripts/screen_grade.py split --greenhouse <board> --job <id> --out quals.json`, grade each qualification with `resume-scorer`, then `python3 scripts/screen_grade.py grade --resume ~/resumes/me.pdf --quals quals.json --grades grades.json --portfolio portfolio.json --md screen.md`
 4. Step 2, LinkedIn: `python3 scripts/linkedin_score.py --profile linkedin.txt --market resume-score.json --portfolio portfolio.json --resume ~/resumes/me.pdf --json linkedin-score.json`
 5. Step 3, GitHub: `python3 scripts/github_score.py --user yourhandle --repos repo-a,repo-b --market resume-score.json --portfolio portfolio.json --json github-score.json`
-6. Step 4, portfolio: `python3 scripts/portfolio_audit.py --url https://yourname.dev --json portfolio-score.json`, then `python3 scripts/sync_check.py --portfolio portfolio.json --resume ~/resumes/me.pdf --linkedin linkedin.txt --github yourhandle --md sync.md`
-7. Step 5, two scores and the resume gate: `python3 scripts/scorecard.py composite --resume resume-score.json --linkedin linkedin-score.json --github github-score.json --portfolio portfolio-score.json --sync sync.md --json composite.json`
+6. Step 4, portfolio: `python3 scripts/portfolio_audit.py --url https://yourname.dev --portfolio portfolio.json --checklist checklist.json --json portfolio-score.json` (the `portfolio-scorer` skill writes `checklist.json`), then `python3 scripts/sync_check.py --portfolio portfolio.json --resume ~/resumes/me.pdf --linkedin linkedin.txt --github yourhandle --md sync.md`
+7. Step 5, two scores and the resume gate: `python3 scripts/scorecard.py composite --resume resume-score.json --linkedin linkedin-score.json --github github-score.json --portfolio portfolio-score.json --sync sync.md --screen screen.json --json composite.json` (write `screen.json` with `screen_grade.py grade --out`)
 8. Step 6, plan: `python3 scripts/scorecard.py plan --composite composite.json --md plan.md`
 9. Step 7, rebuild: `python3 scripts/resume_rebuild.py --portfolio portfolio.json --brag ~/code/portfolio/brag/entries --market resume-score.json --out ~/resumes/me-backend-resume.txt`, then `--check` the finished PDF.
 10. Track every application: `python3 scripts/funnel.py init --file ~/job-search/funnel.csv`
@@ -102,7 +141,7 @@ Run `/job-hunt` to see your next step. Shortcuts: `/score-resume`, `/mock-screen
 | BLS Public Data API v1 | OEWS wages, no registration (small daily quota) | https://www.bls.gov/developers/ |
 | Your saved postings, or public Greenhouse, Lever and Ashby boards | What employers ask for right now, including tools O*NET hasn't added | |
 
-**Live-data rule:** the scorers and market tools stop with `STOPPED:` if O*NET or BLS can't be reached. They never fall back to remembered or cached numbers.
+**Live-data rule:** the scorers and market tools stop with `STOPPED:` if O*NET or BLS can't be reached. They never fall back to remembered numbers. Steps 2 to 4 reuse the skill list step 1 saved in `resume-score.json`, so every surface is scored against one target; rerun step 1 to refresh it.
 
 ## You are the product
 
@@ -110,8 +149,8 @@ You move through an AI-powered ATS, then a hiring manager, then the dev team ove
 
 ## How the resume is scored (two scores)
 
-1. **Lane score, 0 to 100** (`resume-scorer` + `resume_score.py`). Parse gate first: a file the screener can't read gets no score. Then each in-demand skill for the lane, from live O*NET Technology Skills plus your saved postings, is graded on its evidence across the resume, GitHub and LinkedIn: proven 1.0 (named in an Experience or Projects bullet with a number, and shown in a pinned repo pushed in the last year or in LinkedIn Experience, Projects or Featured), applied 0.7 (in a bullet, but missing the number or the outside proof), listed 0.4, stale 0.3, none 0. Steps 2 and 3 write that evidence; the composite applies it, or pass `--github` and `--linkedin` to step 1. BLS outlook is reported beside it. Run it on your complete resume, with everything in it, not a role cut.
-2. **Screen Grade, A to D** (`resume-scorer` + `screen_grade.py`). Mirrors Workday HiredScore: parse gate, knockout questions, then each basic and preferred qualification of one posting marked Met or Not Met with an exact quote. A = all basic + more than half of preferred (read it as "A or B"), B = all basic, C = most basic, D = half or fewer. Run it for every application.
+1. **Lane score, 0 to 100** (`resume-scorer` + `resume_score.py`). Parse gate first: a file the screener can't read gets no score (a missing email or phone is a fix, not a block). Then each in-demand skill for the lane, from live O*NET Technology Skills plus your saved postings, is graded on its evidence across the resume, GitHub and LinkedIn: proven 1.0 (named in an Experience or Projects bullet with a number, and shown in a pinned repo pushed in the last year or in LinkedIn Experience, Projects or Featured), applied 0.7 (in a bullet, but missing the number or the outside proof), listed 0.4, stale 0.3, none 0. A number is a quantity (40%, 10,000, $2M), not a digit inside a name (S3, EC2). The score counts your best 10 skills, weighted by demand (`--need`): no one resume proves every skill an occupation uses, so 100 means the lane's ten most-wanted skills are all proven. That is a VWC design judgment. The outside proof is corroboration you supply, not verification. Steps 2 and 3 write that evidence; the composite applies it, or pass `--github` and `--linkedin` to step 1. BLS outlook is reported beside it. Run it on the resume you send for the lane.
+2. **Screen Grade, A to D** (`resume-scorer` + `screen_grade.py`). Mirrors Workday HiredScore: parse gate, knockout questions, then each basic and preferred qualification of one posting marked Met or Not Met with an exact quote. A = all basic + more than half of preferred (read it as "A or B"), B = all basic, C = most basic, D = half or fewer. The script refuses a quote that isn't on the resume or that names none of the skills the qualification asks for. `screen_grade.py agree` measures how far two graders agree (target: same letter, 90% of qualifications). Run it for every application.
 
 How the ATS works, claim by claim with sources: `references/ats-research.md`. Neither score is a hiring prediction. Employers set their own weights and don't publish them.
 
@@ -126,7 +165,7 @@ How the ATS works, claim by claim with sources: `references/ats-research.md`. Ne
 ```
 python3 -m unittest discover -s tests -v
 ```
-Offline tests with synthetic fixtures cover parsing, demand ranking, every step of the scoring chain (GitHub is stubbed), the screen grade (quote check, letters, parse gate, git refusal), the live-data stop, the funnel tracker and Friday Setup redaction.
+Offline tests with synthetic fixtures cover parsing, demand ranking, every step of the scoring chain (GitHub is stubbed), both O*NET layouts, the skill matcher's false positives, the screen grade (quote check, letters, parse gate, grader agreement, git refusal), the live-data stop, the funnel tracker and Friday Setup redaction.
 
 ## Edit the skill vocabulary
 

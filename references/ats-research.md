@@ -76,7 +76,8 @@ New York City requires employers using automated screening to get a yearly indep
 
 | Scorer step | From |
 |---|---|
-| Parse gate first; a failed gate means no score | Parsing is the gate (Sept 17); HiredScore gives no grade to unreadable files |
+| Parse gate first; a failed gate means no score. A missing email or phone is a fix, not a block | Parsing is the gate (Sept 17); HiredScore gives no grade to unreadable files |
+| Score counts the best 10 lane skills, weighted by demand | VWC design judgment: no one resume proves every skill an occupation uses. Configurable (`--need`) |
 | Parse-breaker checks: columns, special characters, standard headings, contact info in the top lines, dates | What breaks the parser (Feb 3, Feb 4, Jan 11) |
 | Lane skills pulled live from O*NET (plus your saved postings), with BLS outlook beside them | Oct 14 2026: "O*NET posting share and importance values, with BLS outlook reported alongside" |
 | Each skill graded proven 1.0, applied 0.7, listed 0.4, stale 0.3, none 0. Proven needs a resume bullet with a number AND the same skill in a pinned repo pushed in the last year or in LinkedIn Experience, Projects or Featured | Evidence over lists (Sept 17); signal strength (Feb 3); recency (Jan 11); rankers read LinkedIn and GitHub alongside the resume (Oct 7, Sept 17); AI screeners score GitHub and LinkedIn activity against the posting (Nov 8 2026, chat only). The one-year window is a VWC design judgment |

@@ -1,6 +1,6 @@
-Headline: Software Engineer · Python, FastAPI, PostgreSQL · Shipped a RAG eval harness used by 3 teams
+Headline: Software Developer · Python, FastAPI, PostgreSQL · Shipped a RAG eval harness used by 3 teams
 Location: Atlanta, GA
-Open to Work: Software Engineer, Backend Engineer
+Open to Work: Software Developer, Backend Engineer
 
 About:
 I build backend services and AI tools that answer real questions with measured accuracy.

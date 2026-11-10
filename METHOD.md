@@ -11,7 +11,7 @@ The bar is the resume-market-scorer in [Vets-Who-Code/hashflag-skills](https://g
    - Frameworks and numbers from Jerome's Claude chats are filed in `references/jerome-chat-archive.md`, each citing its chat. Any figure marked `[unverified]` there is never used as a rule until someone finds its source.
 3. **Evidence is a quote.** A grade of "met", "proven" or "pass" needs an exact quote from the resume, profile, repo or transcript. No quote means not met. Scripts refuse quotes that aren't in the text.
 4. **Rubrics have thresholds, not vibes.** Each rubric says what earns each level and what the pass line is. If a level can't be checked from evidence, it isn't in the rubric.
-5. **Grading disagreements get measured.** Where a person or an AI grades (resume skills, interview answers), the tool says how consistency was measured and the target spread. Rules get tightened until graders agree; the rule is never bent for one person.
+5. **Grading disagreements get measured.** Where a person or an AI grades the Screen Grade, a second grader (the `ats-screener` agent) grades the same posting on its own, and `screen_grade.py agree` reports how far the two agree. The target is the same letter and 90% of qualifications graded the same way [VWC]. Rules get tightened until graders agree; the rule is never bent for one person. Interview answers have no second-grader check yet: the `ai-interviewer` rubric is fixed before the first question, and that is all the kit claims for it.
 6. **Not a hiring prediction.** Employers set their own weights and don't publish them. Every score says what it mirrors and that it is not a promise.
 
 ## What we don't use, and why

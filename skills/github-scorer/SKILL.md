@@ -10,7 +10,7 @@ description: "Step 3 of the scoring chain. Scores a public GitHub profile with t
 ## Run it
 `python3 $KIT/scripts/github_score.py --user <handle> --repos <pinned,repos> --market resume-score.json --portfolio <repo>/portfolio.json --json github-score.json --md github-score.md`
 - Pass the pinned repos: the REST API doesn't list pins, so without `--repos` it reads the six most recently pushed and says so.
-- No token, no account: 60 requests an hour, about 20 a run. If GitHub can't be reached it stops (exit 3); say so.
+- No token, no account: 60 requests an hour per IP address (a shared network shares it), about 20 a run. If GitHub can't be reached it stops (exit 3); say so. On a rate-limit stop, wait an hour or `export GITHUB_TOKEN=$(gh auth token)` and rerun.
 - Report the score and the top six fixes. The weights are a VWC rubric; GitHub publishes no hiring score.
 - The JSON also carries `skill_evidence`: each lane skill a pinned repo pushed in the last year shows. AI screeners score activity against the posting (Jerome, Nov 8 2026), so step 1 and the composite use it: a resume skill is proven only when GitHub or LinkedIn backs it.
 

@@ -22,6 +22,9 @@ or their AI assistant, and this script refuses any grade it can't verify against
   2. Grade each qualification in grades.json (Met only with an exact resume quote), then:
        python3 screen_grade.py grade --resume resume.pdf --quals quals.json --grades grades.json \\
            [--portfolio portfolio.json] [--md report.md] [--out report.json]
+  3. Optional: have a second grader fill its own grades file, then measure how far the two agree:
+       python3 screen_grade.py agree --quals quals.json --grades grades.json grades-2.json
+     [VWC] target: the same letter and at least 90% of qualifications graded the same way.
 
 grades.json:
   {"title": {"resume_title": "Software Engineer"},
@@ -66,7 +69,7 @@ KNOCKOUTS = [  # [vendor] application questions that screen out before any ranki
 FORM_ONLY = re.compile(r"\b(authori[sz]ed to work|work authori[sz]ation|sponsorship|right to work|u\.?s\.? citizen|"
                        r"background check|drug (?:test|screen)|equal opportunity)\b", re.I)
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
-PHONE = re.compile(r"(?:\+?1[\s.-]?)?(?:\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]\d{4}\b")
+PHONE = re.compile(r"(?<![\d-])(?:\+\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{4}(?![\d-])")  # US and international
 MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
 DATE_RANGE = re.compile(rf"((?:{MONTHS}\s+)?(?:19|20)\d{{2}})\s*(?:-|–|—|to)\s*((?:{MONTHS}\s+)?(?:19|20)\d{{2}}|present|current|now)", re.I)
 SECTION_NAMES = re.compile(r"^\s*(professional\s+|work\s+|relevant\s+)?(experience|employment|work history|projects?|"
@@ -104,16 +107,16 @@ def fetch_posting(kind: str, board: str, job: str) -> tuple[str, str]:
     if kind == "greenhouse":
         d = net.fetch_json(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs/{job}?content=true")
         import html
-        return d.get("title", ""), postings.strip_html(html.unescape(d.get("content", "")))
+        return d.get("title", ""), postings.html_to_text(html.unescape(d.get("content", "")))
     if kind == "lever":
         d = net.fetch_json(f"https://api.lever.co/v0/postings/{board}/{job}?mode=json")
-        lists = "\n".join(f"{x.get('text', '')}\n" + postings.strip_html(x.get("content", "")) for x in d.get("lists", []))
+        lists = "\n".join(f"{x.get('text', '')}\n" + postings.html_to_text(x.get("content", "")) for x in d.get("lists", []))
         return d.get("text", ""), "\n".join([d.get("descriptionPlain", ""), lists, d.get("additionalPlain", "")])
     if kind == "ashby":
         d = net.fetch_json(f"https://api.ashbyhq.com/posting-api/job-board/{board}?includeCompensation=false")
         for j in d.get("jobs", []):
             if j.get("id") == job or j.get("jobUrl", "").rstrip("/").endswith(job):
-                return j.get("title", ""), j.get("descriptionPlain") or postings.strip_html(j.get("descriptionHtml", ""))
+                return j.get("title", ""), j.get("descriptionPlain") or postings.html_to_text(j.get("descriptionHtml", ""))
         raise net.FetchError(f"job {job} not found on Ashby board {board}")
     raise ValueError(kind)
 
@@ -124,10 +127,9 @@ CRITICAL_MENTIONS = 3  # [VWC] deck M2 "Decode the job description": 3+ mentions
 def decode_posting(text: str, basic: list[str], pref: list[str]) -> list[dict]:
     """Highlight, sort, count: every named skill, how often the posting says it, and where."""
     vocab = lexicon.build_vocab()
-    low = text.lower()
     out = []
     for skill in sorted(lexicon.find_skills(text, vocab)):
-        hits = sum(len(lexicon._pattern(alias).findall(low)) for alias in vocab[skill])
+        hits = sum(len(lexicon._pattern(alias).findall(text)) for alias in vocab[skill])
         in_basic = any(skill in lexicon.find_skills(b, vocab) for b in basic)
         in_pref = any(skill in lexicon.find_skills(b, vocab) for b in pref)
         tier = "required" if in_basic else "preferred" if in_pref else "nice-to-have"
@@ -138,6 +140,7 @@ def decode_posting(text: str, basic: list[str], pref: list[str]) -> list[dict]:
 
 def split_posting(title: str, text: str) -> dict:
     basic, pref, form_only, current = [], [], [], None
+    text = text.replace("\u2019", "'").replace("\u2018", "'")  # "What you\u2019ll bring" is a header too
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
@@ -191,25 +194,40 @@ def split_posting(title: str, text: str) -> dict:
 # ---------------------------------------------------------------- step 2: grade
 
 def sections(text: str) -> list[tuple[str, str]]:
-    """Return [(section_name, line)] for every non-empty resume line."""
+    """Return [(section_name, line)] for every non-empty resume line.
+
+    A bullet that wraps onto more lines comes back as one line, so a skill on the first line and its
+    number on the second are graded together."""
     cur, out = "header", []
+    bullet_indent = None  # indent of the bullet the next line may continue
     for raw in text.splitlines():
         line = raw.strip()
         if not line:
+            bullet_indent = None
             continue
         m = SECTION_NAMES.match(line)
         if m:
-            cur = m.group(2).lower()
+            cur, bullet_indent = m.group(2).lower(), None
             continue
+        indent = len(raw) - len(raw.lstrip())
+        if BULLET.match(line):
+            bullet_indent = indent
+        elif bullet_indent is not None and out and not DATE_RANGE.search(line) and (
+                indent > bullet_indent or (line[0].islower() and out[-1][1][-1] not in ".;:!?"
+                                           and "|" not in line and "http" not in line)):
+            out[-1] = (cur, out[-1][1] + " " + line)
+            continue
+        else:
+            bullet_indent = None
         out.append((cur, line))
     return out
 
 
 def quote_found(quote: str, text: str) -> bool:
-    if not quote.strip():
-        return False
     hay = norm(text)
     parts = [norm(p) for p in quote.split("...") if norm(p)]
+    if sum(len(p) for p in parts) < 8:  # "" and "..." quote nothing
+        return False
     pos = 0
     for p in parts:
         i = hay.find(p, pos)
@@ -217,6 +235,17 @@ def quote_found(quote: str, text: str) -> bool:
             return False
         pos = i + len(p)
     return True
+
+
+def names_the_skill(qual: str, quote: str, lines: list[tuple[str, str]], vocab: dict) -> tuple[bool, set]:
+    """A quote can be on the resume and still not answer the qualification. When the qualification names
+    skills the kit knows, the quoted lines must name at least one of them: React doesn't prove Vue. [VWC]"""
+    want = lexicon.find_skills(qual, vocab)
+    if not want:
+        return True, want
+    parts = [norm(p)[:40] for p in quote.split("...") if norm(p)]
+    around = " ".join(l for _, l in lines if any(p in norm(l) for p in parts))
+    return bool(want & lexicon.find_skills(quote + " " + around, vocab)), want
 
 
 def section_of(quote: str, lines: list[tuple[str, str]]) -> str:
@@ -243,7 +272,14 @@ def parse_gate(text: str, lines: list[tuple[str, str]]) -> list[dict]:
     wide = sum(1 for _, l in lines if re.search(r"\S {4,}\S.* {4,}\S", l))
     checks.append(("Single column", wide <= max(3, len(lines) // 10), f"{wide} lines look like side-by-side columns",
                    "Use one column. Tables and side-by-side columns get read out of order."))
-    return [{"check": c, "ok": ok, "detail": d, "fix": "" if ok else f} for c, ok, d, f in checks]
+    # A file with no email or phone still parses, so those two are reported as fixes and block no score.
+    return [{"check": c, "ok": ok, "detail": d, "fix": "" if ok else f, "blocks": c not in ("Email", "Phone")}
+            for c, ok, d, f in checks]
+
+
+def readable(gate: list[dict]) -> bool:
+    """One rule for both scores: the file gets a score or a grade only if every blocking check passes."""
+    return all(c["ok"] for c in gate if c.get("blocks", True))
 
 
 def format_checks(text: str, lines: list[tuple[str, str]]) -> list[dict]:
@@ -256,13 +292,14 @@ def format_checks(text: str, lines: list[tuple[str, str]]) -> list[dict]:
     date_first = [l for s, l in lines if s != "header" and DATE_RANGE.match(l)
                   and len(re.findall(r"[A-Za-z]{3,}", DATE_RANGE.sub("", l, count=1))) >= 2]
     out.append({"rule": "Don't start lines with a date", "source": "HES", "ok": not date_first, "examples": date_first[:3]})
-    starts = []
-    for m in DATE_RANGE.finditer(text):
-        y = re.search(r"(19|20)\d{2}", m.group(1))
-        starts.append(int(y.group(0)) if y else 0)
-    order_ok = all(a >= b for a, b in zip(starts, starts[1:])) if starts else True
-    out.append({"rule": "Reverse chronological order (most recent first)", "source": "HES", "ok": order_ok,
-                "examples": [] if order_ok else [f"start years in order found: {starts}"]})
+    by_sec: dict[str, list[int]] = {}  # order is judged inside each section: a 2025 project under a 2020 job is fine
+    for s, l in lines:
+        for m in DATE_RANGE.finditer(l):
+            y = re.search(r"(19|20)\d{2}", m.group(1))
+            by_sec.setdefault(s, []).append(int(y.group(0)) if y else 0)
+    out_of_order = {s: ys for s, ys in by_sec.items() if any(a < b for a, b in zip(ys, ys[1:]))}
+    out.append({"rule": "Reverse chronological order (most recent first)", "source": "HES", "ok": not out_of_order,
+                "examples": [f"{s}: start years in order found: {ys}" for s, ys in out_of_order.items()]})
     numbered = [l for s, l in lines if re.match(r"^(?:[IVX]+|[A-H])[.)]\s+[A-Z]", l)]
     out.append({"rule": "Don't number or letter sections", "source": "HES", "ok": not numbered, "examples": numbered[:3]})
     refs = [l for s, l in lines if re.search(r"references (?:available|upon request)", l, re.I)]
@@ -280,9 +317,8 @@ def manipulation_flags(text: str, lines: list[tuple[str, str]], vocab: dict) -> 
         items = [x for x in re.split(r"[,|;•]", l) if x.strip()]
         if sec not in {"skills", "technical skills", "header"} and len(items) >= 12:
             flags.append({"flag": "Keyword block outside Skills", "line": l[:160]})
-    low = text.lower()
     for skill in lexicon.find_skills(text, vocab):
-        hits = sum(len(lexicon._pattern(alias).findall(low)) for alias in vocab[skill])
+        hits = sum(len(lexicon._pattern(alias).findall(text)) for alias in vocab[skill])
         if hits > 10:  # [VWC] heuristic: past ten mentions reads as stuffing, not evidence
             flags.append({"flag": f"{skill} appears {hits} times", "line": ""})
     return flags
@@ -366,6 +402,11 @@ def grade(resume_path: str, quals: dict, grades: dict, record: dict | None) -> d
             verified = quote_found(ev, text)
             if met and not verified:
                 problems.append(f"{q['id']} is marked met but its quote isn't on the resume: {ev[:80]!r}")
+            elif met:
+                named, want = names_the_skill(q["text"], ev, lines, vocab)
+                if not named:
+                    problems.append(f"{q['id']} is marked met but its quote names none of the skills the "
+                                    f"qualification asks for ({', '.join(sorted(want))}): {ev[:80]!r}")
             sec = section_of(ev, lines) if verified else ""
             rows.append({"id": q["id"], "kind": kind, "qualification": q["text"], "met": met and verified,
                          "evidence": ev if verified else "", "section": sec,
@@ -377,14 +418,13 @@ def grade(resume_path: str, quals: dict, grades: dict, record: dict | None) -> d
     bt = sum(1 for r in rows if r["kind"] == "basic")
     pm = sum(r["met"] for r in rows if r["kind"] == "preferred")
     pt = sum(1 for r in rows if r["kind"] == "preferred")
-    readable = all(c["ok"] for c in gate if c["check"] in ("Readable text", "Standard section headings", "Dates parse"))
-    letter, why = grade_letter(bm, bt, pm, pt) if readable else ("No grade", "Fix the format first: the parse gate failed. [vendor: no grade for unreadable formats]")
-    yrs = total_years(text)
+    letter, why = grade_letter(bm, bt, pm, pt) if readable(gate) else ("No grade", "Fix the format first: the parse gate failed. [vendor: no grade for unreadable formats]")
+    yrs = total_years("\n".join(l for s, l in lines if s in EXP_SECTIONS - {"projects", "project"}))
     knock = []
     for k in quals.get("knockouts", []):
         e = dict(k)
         if k["knockout"] == "minimum years":
-            e["resume_shows"] = f"about {yrs:.0f} years of dated roles (any field; count only what the posting means)"
+            e["resume_shows"] = f"about {yrs:.0f} years of dated Experience roles (any field; count only what the posting means)"
             e["ok"] = yrs >= k.get("years", 0)
         else:
             e["resume_shows"] = "answer this on the application form; keep it consistent with the resume"
@@ -405,6 +445,27 @@ def grade(resume_path: str, quals: dict, grades: dict, record: dict | None) -> d
         "manipulation": manipulation_flags(text, lines, vocab),
         "graded_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     }
+
+
+def letter_from(quals: dict, grades: dict) -> tuple[str, dict]:
+    met = {g.get("id"): bool(g.get("met")) for g in grades.get("grades", [])}
+    b = [met.get(q["id"], False) for q in quals.get("basic", [])]
+    p = [met.get(q["id"], False) for q in quals.get("preferred", [])]
+    ids = [q["id"] for q in quals.get("basic", []) + quals.get("preferred", [])]
+    return grade_letter(sum(b), len(b), sum(p), len(p))[0], {i: met.get(i, False) for i in ids}
+
+
+AGREE_TARGET = 0.9  # [VWC] two graders should mark at least 90% of qualifications the same way
+
+
+def agreement(quals: dict, a: dict, b: dict) -> dict:
+    """METHOD rule 5: measure how far two graders agree on the same resume and posting."""
+    la, ma = letter_from(quals, a)
+    lb, mb = letter_from(quals, b)
+    differ = [i for i in ma if ma[i] != mb[i]]
+    share = 1 - len(differ) / len(ma) if ma else 0.0
+    return {"letters": [la, lb], "same_letter": la == lb, "agreement": round(share, 2), "differ": differ,
+            "target": AGREE_TARGET, "ok": la == lb and share >= AGREE_TARGET}
 
 
 def report_md(r: dict) -> str:
@@ -458,12 +519,31 @@ def main(argv=None) -> int:
     g.add_argument("--portfolio", help="portfolio.json, to show which gaps your portfolio already proves")
     g.add_argument("--out")
     g.add_argument("--md")
+    ag = sub.add_parser("agree", help="measure how far two graders agree on the same posting")
+    ag.add_argument("--quals", required=True)
+    ag.add_argument("--grades", required=True, nargs=2, metavar="GRADES")
     a = ap.parse_args(argv)
+
+    if a.cmd == "agree":
+        try:
+            quals = json.loads(pathlib.Path(a.quals).read_text())
+            one, two = (json.loads(pathlib.Path(x).read_text()) for x in a.grades)
+        except (OSError, json.JSONDecodeError) as e:
+            refuse(f"can't read input: {e}")
+        r = agreement(quals, one, two)
+        print(f"Letters: {r['letters'][0]} and {r['letters'][1]}. Graded the same way: {r['agreement']:.0%} "
+              f"(target {AGREE_TARGET:.0%} and the same letter). [VWC]")
+        if r["differ"]:
+            print("Disagree on: " + ", ".join(r["differ"]) + ". Reread the rule for each, regrade both, and "
+                  "tighten the rule if they still differ. Never bend it for one resume.")
+        return 0 if r["ok"] else 1
 
     if a.cmd == "split":
         try:
             if a.posting:
                 title, text = a.title, pathlib.Path(a.posting).expanduser().read_text(errors="replace")
+                if a.posting.lower().endswith((".html", ".htm")):
+                    text = postings.html_to_text(text)
             else:
                 kind = next((b for b in ("greenhouse", "lever", "ashby") if getattr(a, b)), None)
                 if not (kind and a.job):
