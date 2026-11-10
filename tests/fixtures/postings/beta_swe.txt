@@ -1,0 +1,2 @@
+Software Engineer. React, TypeScript, Python services, PostgreSQL. Kubernetes a plus. Unit tests with pytest.
+We use LangGraph agents and evals for our assistant.

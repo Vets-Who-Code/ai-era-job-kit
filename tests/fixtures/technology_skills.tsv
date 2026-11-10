@@ -1,0 +1,8 @@
+O*NET-SOC Code	Example	Commodity Code	Commodity Title	Hot Technology	In Demand
+15-1252.00	Python	43232403	Object or component oriented development software	Y	Y
+15-1252.00	Amazon Web Services AWS software	43233004	Operating system software	Y	Y
+15-1252.00	React	43232408	Web platform development software	Y	N
+15-1252.00	Apache Subversion SVN	43232402	Program testing software	N	N
+15-1252.00	Kubernetes	43233004	Operating system software	Y	N
+15-1252.00	PostgreSQL	43232306	Data base user interface	Y	Y
+15-2051.00	R	43232403	Analytical software	Y	Y

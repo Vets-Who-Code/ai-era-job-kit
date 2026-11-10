@@ -1,0 +1,11 @@
+{
+  "name": "ai-era-job-kit",
+  "owner": { "name": "Vets Who Code" },
+  "plugins": [
+    {
+      "name": "ai-era-job-kit",
+      "source": "./",
+      "description": "Portfolio-first job search kit: a 7-skill scoring chain (resume, LinkedIn, GitHub, portfolio, two scores (machine and human read) with a resume gate, improvement plan, resume rebuilder), 7 agents, 3 commands, stdlib-only scripts."
+    }
+  ]
+}

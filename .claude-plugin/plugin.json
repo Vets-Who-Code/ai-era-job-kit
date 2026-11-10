@@ -1,0 +1,17 @@
+{
+  "name": "ai-era-job-kit",
+  "version": "1.1.0",
+  "description": "Portfolio-first job search kit for software engineers in the AI era: a scoring chain (resume, LinkedIn, GitHub, portfolio, two scores (machine and human read) with a resume gate, improvement plan, resume rebuilder) on live O*NET and BLS data, interview simulators and weekly tracking.",
+  "author": {
+    "name": "Jerome Hardaway, Vets Who Code"
+  },
+  "keywords": [
+    "job-search",
+    "portfolio",
+    "resume",
+    "interview",
+    "career",
+    "onet",
+    "bls"
+  ]
+}

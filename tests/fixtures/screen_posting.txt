@@ -1,0 +1,19 @@
+Software Engineer, Platform
+
+About the role
+You will build services.
+
+What you'll bring
+- 3+ years of professional software engineering experience
+- Strong Python and SQL skills
+- Experience deploying services on AWS or GCP
+- Experience with CI/CD pipelines
+- Must be authorized to work in the US without sponsorship
+
+Nice to have
+- Experience with Kubernetes
+- Familiarity with LLM evals
+- Fintech industry experience
+
+Benefits
+- Health insurance

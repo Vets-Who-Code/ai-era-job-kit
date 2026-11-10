@@ -1,0 +1,43 @@
+{
+  "_about": "Master record for your job search. Lives in your portfolio repo next to brag/ and case-studies/. GitHub, your resume and LinkedIn are built from this file and checked against it with scripts/sync_check.py. Keep it public-safe: no client names under NDA, no private links.",
+  "profile": {
+    "name": "Your Name",
+    "headline": "Software developer who builds AI tools that answer real questions with measured accuracy",
+    "target_role": "Software developer",
+    "onet_code": "15-1252.00",
+    "summary": "Two or three sentences in your own words: what you build, for whom, and your strongest proof.",
+    "location": "City, State (or Remote)"
+  },
+  "links": {
+    "site": "https://yourname.dev",
+    "github": "https://github.com/you",
+    "linkedin": "https://www.linkedin.com/in/you"
+  },
+  "experience": [
+    {
+      "title": "Software Developer",
+      "org": "Example Co",
+      "start": "2024-01",
+      "end": "present",
+      "highlights": ["brag/entries/2026-10-31.md#cut-search-latency"]
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "rag-eval-harness",
+      "one_liner": "Answers policy questions from 2,000 documents with measured accuracy",
+      "url": "https://yourname.dev/projects/rag-eval-harness",
+      "repo": "https://github.com/you/rag-eval-harness",
+      "depth": 3,
+      "skills": ["Python", "FastAPI", "RAG", "pgvector", "Evals", "CI/CD", "Docker"],
+      "evidence": ["tests + CI badge", "eval report", "ADR-001 vector store choice", "architecture diagram"],
+      "case_study": "case-studies/rag-eval-harness.md"
+    }
+  ],
+  "brag": {
+    "entries": "brag/entries",
+    "inbox": "brag/inbox",
+    "_note": "Friday Setup writes raw pulls to brag/inbox (git-ignored). Curated, public-safe entries are promoted to brag/entries and can be published as a Shipped log on your site."
+  },
+  "_depth_ladder": "1 local | 2 deployed | 3 engineered (tests, CI, evals, ADRs, observability) | 4 used (real users, measured outcome)"
+}

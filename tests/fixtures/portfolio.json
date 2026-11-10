@@ -1,0 +1,4 @@
+{"artifacts":[
+ {"name":"rag-eval-harness","url":"https://example.dev/rag","depth":3,"skills":["Python","RAG","Evals","FastAPI","LangGraph"]},
+ {"name":"todo-local","url":"","depth":1,"skills":["React"]}
+]}

@@ -1,0 +1,7 @@
+Pat Example
+AI Engineer
+EXPERIENCE
+Built a RAG assistant in Python and FastAPI serving 2,000 users; added evals that cut bad answers 30%.
+Deployed services on AWS with Docker.
+SKILLS
+Python, React, Kubernetes, LangGraph, COBOL

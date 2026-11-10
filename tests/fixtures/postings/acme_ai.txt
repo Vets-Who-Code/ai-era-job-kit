@@ -1,0 +1,2 @@
+AI Engineer at Acme. Build RAG pipelines with LangGraph and pgvector. Python and FastAPI required.
+Write evals for LLM features. Deploy on AWS with Docker and GitHub Actions CI/CD. Postgres experience.

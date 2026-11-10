@@ -1,0 +1,8 @@
+# Raw, uncurated job-search data never goes to GitHub
+brag/inbox/
+.friday-setup-state.json
+*resume*
+*Resume*
+funnel*.csv
+score.json
+score.md

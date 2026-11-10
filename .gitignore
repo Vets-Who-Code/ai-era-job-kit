@@ -1,0 +1,13 @@
+# Never commit personal job-search data
+*resume*.pdf
+*resume*.docx
+*resume*.txt
+*Resume*
+funnel*.csv
+score.json
+score.md
+brag/
+BragDatabase/
+.friday-setup-state.json
+__pycache__/
+*.pyc

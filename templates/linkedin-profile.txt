@@ -1,0 +1,24 @@
+Headline: Software Engineer · Python, FastAPI, PostgreSQL · Shipped a RAG eval harness used by 3 teams
+Location: Atlanta, GA
+Open to Work: Software Engineer, Backend Engineer
+
+About:
+I build backend services and AI tools that answer real questions with measured accuracy.
+My flagship project answers policy questions from 2,000 documents and scores 91% on its eval set.
+Before that I cut search latency by 40% for an internal tool used every day.
+I'm looking for a backend or AI engineering role on a team that ships. Portfolio: https://yourname.dev
+
+Featured:
+https://yourname.dev/projects/rag-eval-harness
+https://github.com/you/rag-eval-harness
+
+Experience:
+Software Developer, Example Co, Jan 2024 - Present
+Cut search latency 40% by adding a Redis cache in front of PostgreSQL
+Built a FastAPI service that handles 2,000 requests a minute
+
+Skills:
+Python, FastAPI, PostgreSQL, Docker, RAG, Evals, CI/CD
+
+Education:
+B.S. Computer Science, Example University
