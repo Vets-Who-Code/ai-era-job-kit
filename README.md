@@ -1,6 +1,6 @@
 # AI-Era Job Kit
 
-**Bottom line:** a free, portfolio-first toolkit for getting a software engineering job in the AI era. Your portfolio is the base; your resume, LinkedIn and GitHub are scored against the market and rebuilt from it. One scoring chain of 7 skills, 7 agents that use those skills, 3 commands and 11 no-dependency Python scripts. All market data is public, keyless and pulled live on every run. Every number behind a "why" names its source: see `METHOD.md`.
+**Bottom line:** a free, portfolio-first toolkit for getting a software engineering job in the AI era. Your portfolio is the base; your resume, LinkedIn and GitHub are scored against the market and rebuilt from it. One scoring chain of 7 skills, 7 agents that use those skills, 4 commands and 12 no-dependency Python scripts. All market data is public, keyless and pulled live on every run. Every number behind a "why" names its source: see `METHOD.md`.
 
 **The Three Laws:**
 1. Measure everything.
@@ -80,7 +80,7 @@ The `career-scorecard` agent runs all seven in order. Step 5 gives two scores be
 
 No labs run during the session. Each module's take-home lab is in `TAKE-HOME.md`.
 
-Run `/job-hunt` to see your next step. Shortcuts: `/score-resume`, `/mock-screen`.
+Run `/job-hunt` to see your next step. Shortcuts: `/score-resume`, `/score-all`, `/mock-screen`.
 
 ## Start here: score your resume in 5 minutes
 
@@ -132,7 +132,7 @@ python3 $KIT/scripts/score_all.py --resume my-resume.pdf --role "software develo
 
 It prints one line per surface, then the combined report: the total, the machine read, the human read and the resume gate. Every report is saved in the folder, and `plan.md` lists what to fix first.
 
-**After the first run it's just `python3 $KIT/scripts/score_all.py`.** Your answers are saved to `score-all.json` in the folder; pass a flag again to change one. If a live pull fails, that surface is left out and named at the end. An older score is never used in its place. On a shared network, `export GITHUB_TOKEN=$(gh auth token)` first so GitHub's hourly limit doesn't stop you.
+**After the first run it's just `python3 $KIT/scripts/score_all.py`**, or `/score-all` in Claude Code. Your answers are saved to `score-all.json` in the folder; pass a flag again to change one. If a live pull fails, that surface is left out and named at the end. An older score is never used in its place. On a shared network, `export GITHUB_TOKEN=$(gh auth token)` first so GitHub's hourly limit doesn't stop you.
 
 ## Quick start: the full chain (in order)
 
