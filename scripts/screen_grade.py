@@ -72,14 +72,18 @@ EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 PHONE = re.compile(r"(?<![\d-])(?:\+\d{1,3}[\s.-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{4}(?![\d-])")  # US and international
 MONTHS = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?"
 DATE_RANGE = re.compile(rf"((?:{MONTHS}\s+)?(?:19|20)\d{{2}})\s*(?:-|–|—|to)\s*((?:{MONTHS}\s+)?(?:19|20)\d{{2}}|present|current|now)", re.I)
-SECTION_NAMES = re.compile(r"^\s*(professional\s+|work\s+|relevant\s+)?(experience|employment|work history|projects?|"
-                           r"education|skills|technical skills|certifications?|summary|volunteer\w*|open source)\s*:?\s*$", re.I)
-PRONOUN = re.compile(r"\b(I|me|my|mine|myself)\b")
+# Headings people really use beside the standard four: "Leadership", "Teaching & Publications", "Awards, Certifications & Service"
+_MORE = r"(?:leadership|teaching|publications?|awards?|honors?|certifications?|licenses?|military service|service|activities|training|languages|community)"
+SECTION_NAMES = re.compile(r"^\s*(professional\s+|work\s+|relevant\s+|earlier\s+|additional\s+|other\s+|prior\s+|previous\s+)?"
+                           r"(experience|employment|work history|projects?|education|skills|technical skills|summary|volunteer\w*|"
+                           r"open source|leadership experience|" + _MORE + r"(?:\s*(?:,\s*and|,|&|and)\s*" + _MORE + r")*)\s*:?\s*$", re.I)
+# "I" the pronoun, not the I in "Google I/O" or "Engineer I, Acme"
+PRONOUN = re.compile(r"(?<![\w/])I(?=['’]|\s+[a-z])|\b(?:me|my|mine|myself)\b")
 YEARS_CLAIM = re.compile(r"\b(\d{1,2})\+?\s*(?:years|yrs)\b", re.I)
 WEAK_START = re.compile(r"^(responsible for|duties included|worked on|helped|assisted with|tasked with|in charge of)\b", re.I)
 SENIORITY = re.compile(r"\b(senior|sr\.?|junior|jr\.?|staff|principal|lead|ii|iii|iv|i|intern|associate|mid[- ]level|entry[- ]level)\b", re.I)
 EXP_SECTIONS = {"experience", "employment", "work history", "projects", "project", "volunteer", "volunteering",
-                "volunteer experience", "open source"}
+                "volunteer experience", "open source", "leadership", "leadership experience"}
 
 
 def refuse(msg: str) -> None:
@@ -282,6 +286,16 @@ def readable(gate: list[dict]) -> bool:
     return all(c["ok"] for c in gate if c.get("blocks", True))
 
 
+def _end_month(end: str) -> int:
+    """The end of a date range as a month count; Present sorts after every date."""
+    y = re.search(r"(19|20)\d{2}", end)
+    if not y:
+        return 10 ** 6
+    m = re.match(rf"\s*({MONTHS})", end, re.I)
+    mon = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].index(m.group(1)[:3].lower()) + 1 if m else 12
+    return int(y.group(0)) * 12 + mon
+
+
 def format_checks(text: str, lines: list[tuple[str, str]]) -> list[dict]:
     out = []
     bullets = [(s, BULLET.sub("", l)) for s, l in lines if BULLET.match(l) or s in EXP_SECTIONS]
@@ -295,11 +309,11 @@ def format_checks(text: str, lines: list[tuple[str, str]]) -> list[dict]:
     by_sec: dict[str, list[int]] = {}  # order is judged inside each section: a 2025 project under a 2020 job is fine
     for s, l in lines:
         for m in DATE_RANGE.finditer(l):
-            y = re.search(r"(19|20)\d{2}", m.group(1))
-            by_sec.setdefault(s, []).append(int(y.group(0)) if y else 0)
-    out_of_order = {s: ys for s, ys in by_sec.items() if any(a < b for a, b in zip(ys, ys[1:]))}
+            by_sec.setdefault(s, []).append(_end_month(m.group(2)))
+    # Most recent first means by end date: two roles that both run to Present are in order either way
+    out_of_order = {s: ends for s, ends in by_sec.items() if any(a < b for a, b in zip(ends, ends[1:]))}
     out.append({"rule": "Reverse chronological order (most recent first)", "source": "HES", "ok": not out_of_order,
-                "examples": [f"{s}: start years in order found: {ys}" for s, ys in out_of_order.items()]})
+                "examples": [f"{s}: a role that ended earlier is listed above one that ended later" for s in out_of_order]})
     numbered = [l for s, l in lines if re.match(r"^(?:[IVX]+|[A-H])[.)]\s+[A-Z]", l)]
     out.append({"rule": "Don't number or letter sections", "source": "HES", "ok": not numbered, "examples": numbered[:3]})
     refs = [l for s, l in lines if re.search(r"references (?:available|upon request)", l, re.I)]

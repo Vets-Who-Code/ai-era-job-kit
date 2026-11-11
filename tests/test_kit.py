@@ -721,6 +721,44 @@ class TestResumeScoreRules(unittest.TestCase):
         self.assertIn("Testing", lexicon.find_skills("Added automated tests", v))
         self.assertNotIn("Testing", lexicon.find_skills("Ran usability tests with customers", v))
 
+    def test_real_resume_shapes_raise_no_false_flags(self):
+        import resume_score as rs
+        import screen_grade as sg
+        text = ("Jane Doe\njane@example.com\n\nPROFESSIONAL EXPERIENCE\n"
+                "Engineer, Acme, April 2026 – Present\n- Built a Python service used by 40 teams\n"
+                "Developer, Beta, February 2018 – June 2020\n- Shipped React interfaces\n\n"
+                "EARLIER EXPERIENCE\nWeb Developer, Gamma, February 2015 – May 2016\n\n"
+                "LEADERSHIP\nFounder, Nonprofit, May 2014 – Present\n- Built the platform in Python for 500 users\n\n"
+                "TEACHING & PUBLICATIONS\n- Instructor, Courses Inc (March 2020 – Present)\n- Instructor, Other Co (January 2023 – Present)\n\n"
+                "AWARDS, CERTIFICATIONS & SERVICE\n- Google I/O 2025 invitee; Engineer I, Acme\n"
+                "- Air Force (September 2004 – September 2009)\n")
+        lines = sg.sections(text)
+        self.assertEqual({s for s, _ in lines}, {"header", "experience", "leadership", "teaching & publications",
+                                                 "awards, certifications & service"})
+        fmt = {f["rule"].split()[0]: f["ok"] for f in sg.format_checks(text, lines)}
+        self.assertTrue(fmt["No"])        # the I in "Google I/O" and "Engineer I" is not a pronoun
+        self.assertTrue(fmt["Reverse"])   # two roles that both run to Present are in order
+        self.assertTrue(sg.PRONOUN.search("Then I led the team") and sg.PRONOUN.search("I've shipped it"))
+        gaps = [c["detail"] for c in rs.chronology(text, 2026) if c["flag"].startswith("Gap")]
+        self.assertEqual(len(gaps), 1)    # 2009 to 2014 is a gap; 2016 to 2018 is covered by the 2014 - Present role
+        self.assertIn("2009", gaps[0])
+        spans = rs.role_spans(lines, 2026)  # a Leadership role with a number counts as experience
+        self.assertEqual(rs.grade_skill("Python", lexicon.build_vocab(), lines, spans, 2026)[0], "proven")
+
+    def test_role_search_prefers_the_occupation_that_names_the_role(self):
+        o = onet.Onet(version="30_2")
+        o._cache["Occupation Data.txt"] = [{"O*NET-SOC Code": c, "Title": t} for c, t in (
+            ("17-2051.00", "Civil Engineers"), ("17-2141.00", "Mechanical Engineers"), ("15-1254.00", "Web Developers"),
+            ("15-1221.00", "Computer and Information Research Scientists"), ("15-1252.00", "Software Developers"))]
+        o._cache["Alternate Titles.txt"] = [{"O*NET-SOC Code": c, "Alternate Title": t, "Short Title": ""} for c, t in (
+            ("15-1221.00", "AI Engineer (Artificial Intelligence Engineer)"), ("15-1254.00", "Back End Engineer"),
+            *[("17-2051.00", f"Civil Engineer {i}") for i in range(40)], ("17-2141.00", "Aircraft Maintenance Engineer"))]
+        top = lambda q: o.search(q, limit=1)[0]["code"]
+        self.assertEqual(top("AI engineer"), "15-1221.00")       # not the occupation with the most "engineer" titles
+        self.assertEqual(top("backend engineer"), "15-1254.00")  # "backend" = "Back End"
+        self.assertEqual(top("software developer"), "15-1252.00")
+        self.assertEqual(o.search("zzzqqq"), [])
+
     def test_bad_input_is_refused_before_any_pull(self):
         import resume_score as rs
         with tempfile.TemporaryDirectory() as d:

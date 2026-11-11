@@ -76,6 +76,13 @@ def parse_tsv(text: str, delimiter: str = "\t") -> list[dict]:
     return [{(k or "").strip(): (v or "").strip() for k, v in row.items()} for row in reader]
 
 
+def _word_in(word: str, hay: str) -> bool:
+    """True if a word in hay starts with `word` ("engineer" finds "engineers"). Words of one or two letters
+    must match whole, so "ai" doesn't find "aircraft" or the middle of "maintenance"."""
+    tail = r"(?![a-z0-9])" if len(word) <= 2 else ""
+    return re.search(r"(?<![a-z0-9])" + re.escape(word) + tail, hay) is not None
+
+
 def _col(row: dict, *candidates: str) -> str:
     """Header names drift a little between releases; match loosely."""
     lowered = {k.lower(): v for k, v in row.items()}
@@ -99,32 +106,48 @@ class Onet:
 
     # -- occupations -------------------------------------------------------
     def search(self, query: str, limit: int = 8) -> list[dict]:
-        """Rank occupations by title / alternate-title match to a role name."""
+        """Rank occupations by title / alternate-title match to a role name.
+
+        An occupation that lists the role by name ("AI Engineer", "Back End Engineer") outranks any that only
+        shares a word with it: "engineer" alone would send every engineering role to Civil Engineers."""
         q = [w for w in re.findall(r"[a-z0-9+#.]+", query.lower()) if len(w) > 1]
         if not q:
             return []
+        squash = lambda t: re.sub(r"[^a-z0-9+#.]", "", t.lower())  # "Back-End" = "backend" = "back end"
+        nq = squash(query)
         scores: dict[str, float] = {}
+        partial: dict[str, float] = {}
         titles: dict[str, str] = {}
         for row in self._t("Occupation Data.txt"):
             code = _col(row, "O*NET-SOC Code")
             title = _col(row, "Title")
             titles[code] = title
             hay = title.lower()
-            hits = sum(1 for w in q if w in hay)
+            hits = sum(1 for w in q if _word_in(w, hay))
             if hits:
                 scores[code] = scores.get(code, 0) + 3 * hits / len(q)
+            if squash(title) in (nq, nq + "s"):
+                scores[code] = scores.get(code, 0) + 10
         try:
             alts = self._t("Alternate Titles.txt")
         except FetchError:
             alts = []
+        named: set[str] = set()
         for row in alts:
             code = _col(row, "O*NET-SOC Code")
-            hay = (_col(row, "Alternate Title", "Job Title") + " " + _col(row, "Short Title")).lower()
-            hits = sum(1 for w in q if w in hay)
-            if hits == len(q):
+            alt, short = _col(row, "Alternate Title", "Job Title"), _col(row, "Short Title")
+            hay = (alt + " " + short).lower()
+            hits = sum(1 for w in q if _word_in(w, hay))
+            # "AI Engineer (Artificial Intelligence Engineer)": either name is the role
+            if code not in named and nq in {squash(x) for x in [short, *re.split(r"[()]", alt)]}:
+                named.add(code)
+                scores[code] = scores.get(code, 0) + 10
+            if hits == len(q) or nq in squash(alt):
                 scores[code] = scores.get(code, 0) + 1.5
-            elif hits:
-                scores[code] = scores.get(code, 0) + 0.25 * hits / len(q)
+            elif hits:  # a shared word is weak: count the best one once, not once per alternate title
+                partial[code] = max(partial.get(code, 0), 0.25 * hits / len(q))
+        for code, v in partial.items():
+            scores[code] = scores.get(code, 0) + v
         ranked = sorted(scores.items(), key=lambda kv: -kv[1])[:limit]
         return [{"code": c, "title": titles.get(c, ""), "match": round(s, 2),
                  "url": ONLINE_SUMMARY.format(code=c)} for c, s in ranked]

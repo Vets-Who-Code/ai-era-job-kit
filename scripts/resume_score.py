@@ -140,7 +140,9 @@ def chronology(text: str, now: int) -> list[dict]:
             flags.append({"flag": "Role under a year", "detail": label,
                           "fix": "Be ready to explain it in one line (contract, layoff, move). Group contract roles under one heading if true."})
     ordered = sorted(spans)
-    for (s1, e1, l1), (s2, e2, l2) in zip(ordered, ordered[1:]):
+    for i in range(1, len(ordered)):  # a gap is time no role covers: a long role running alongside fills it
+        e1, l1 = max((e, l) for _, e, l in ordered[:i])
+        s2, _, l2 = ordered[i]
         if s2 - e1 > 0.5:
             flags.append({"flag": "Gap over 6 months", "detail": f"{l1} then {l2}",
                           "fix": "Fill it with what's true: training, a build, volunteer work, caregiving, service."})
