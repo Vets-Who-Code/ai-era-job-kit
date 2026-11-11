@@ -32,6 +32,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+from jobdata import calibration as cal  # noqa: E402
 from jobdata import docs, lexicon  # noqa: E402
 from jobdata import market as mk  # noqa: E402
 from jobdata.net import FetchError  # noqa: E402
@@ -57,6 +58,38 @@ CONTACT_LINE = re.compile(r"@|linkedin\.com|www\.|https?://|\(")
 URL = re.compile(r"https?://\S+|\b[\w-]+\.(?:dev|io|com|me|app|net|org)\b", re.I)
 # LinkedIn's Save to PDF leaves these out, so a PDF can't fail them: they're skipped, and the report says so.
 NOT_IN_PDF = {"featured": "Featured", "open_to_work": "Open to Work"}
+
+
+def pdf_columns(text: str) -> str:
+    """LinkedIn's Save to PDF, read with its layout kept, as one column: the sidebar (Contact, Top Skills,
+    Certifications), then the main column with the headline and location labeled.
+
+    Reading order alone interleaves the two columns once the sidebar runs long, and a headline that wraps
+    onto a second line can't be told from the name above it. The layout keeps both apart."""
+    side: list[str] = []
+    main: list[str] = []
+    for page in text.split("\f"):
+        rows = [l for l in page.splitlines() if l.strip() and not PAGE_FOOTER.match(l.strip())]
+        indents = [len(l) - len(l.lstrip()) for l in rows]
+        deep = [i for i in indents if i >= 20]
+        off = max(set(deep), key=deep.count) if len(deep) >= 3 else 0  # where the main column starts, if there is a sidebar
+        for l, ind in zip(rows, indents):
+            if not off:
+                main.append(l.strip())
+            elif ind >= off - 2:
+                main.append(l.strip())
+            elif len(l) > off and not l[off - 2:off].strip():
+                side.append(l[:off].strip())
+                main.append(l[off:].strip())
+            else:
+                side.append(l.strip())
+    at = next((i for i, l in enumerate(main) if HEAD_RE.match(l)), len(main))
+    top = main[:at]  # name, headline (one or more lines), location
+    if len(top) >= 3:
+        top = [f"Headline: {' '.join(top[1:-1])}", f"Location: {top[-1]}"]
+    elif len(top) == 2:
+        top = [f"Headline: {top[1]}"]
+    return "\n".join(side + top + main[at:])
 
 
 def split_profile(text: str) -> dict[str, str]:
@@ -97,6 +130,8 @@ def score(text: str, market: dict, record: dict | None = None, resume: str | Non
           from_pdf: bool = False) -> dict:
     s = split_profile(text)
     skipped = [name for key, name in NOT_IN_PDF.items() if from_pdf and not s.get(key)]
+    if from_pdf:
+        skipped.append("the full Skills list (the PDF shows only your top skills)")
     head, about = s.get("headline", ""), s.get("about", "")
     exp = s.get("experience", "") + "\n" + s.get("projects", "")
     skills_txt = s.get("skills", "")
@@ -131,8 +166,9 @@ def score(text: str, market: dict, record: dict | None = None, resume: str | Non
                         otw[:100], 1, "Turn on Open to Work with the exact titles you apply to (recruiters only, if you're employed)."))
     # 4 Skills: the skills you can prove, named the market's way [vendor: skills are a filter]
     share, found, missing = mk.coverage(skills_txt, market, top=10)
-    checks.append(C("Skills", "Skills section covers the lane's top 10", share >= 0.6, f"{round(100 * share)}% weighted; missing {', '.join(missing[:5])}", 3,
-                    f"Add the lane skills you can prove, named the market's way: {', '.join(missing[:5])}."))
+    if not from_pdf:
+        checks.append(C("Skills", "Skills section covers the lane's top 10", share >= 0.6, f"{round(100 * share)}% weighted; missing {', '.join(missing[:5])}", 3,
+                        f"Add the lane skills you can prove, named the market's way: {', '.join(missing[:5])}."))
     if record:
         # Match both sides through the same aliases: "Postgres" in the record proves "PostgreSQL" on LinkedIn
         proven = lexicon.find_skills(" , ".join(x for a in record.get("artifacts", []) for x in a.get("skills", [])), market["vocab"])
@@ -177,7 +213,7 @@ def score(text: str, market: dict, record: dict | None = None, resume: str | Non
     for label, body in (("Experience", s.get("experience", "")), ("Projects", s.get("projects", "")), ("Featured", feat)):
         for sk in lexicon.find_skills(body, market["vocab"]):
             evidence.setdefault(sk, []).append(f"LinkedIn {label}")
-    return {"surface": "linkedin", "score": mk.weighted(checks), "checks": checks, "market": market["source"],
+    return {"surface": "linkedin", "score": cal.calibrate(mk.weighted(checks)), "calibration": cal.CALIBRATION, "checks": checks, "market": market["source"],
             "coverage_top10": round(share, 2), "missing_top10": missing, "skill_evidence": evidence,
             "skipped": skipped}
 
@@ -190,9 +226,9 @@ def report_md(r: dict) -> str:
     if fails:
         L += ["", "## Fix first", *[f"{i}. {c['fix']}" for i, c in enumerate(fails[:5], 1)]]
     if r.get("skipped"):
-        L += ["", f"Not checked: {' and '.join(r['skipped'])}. LinkedIn's PDF leaves them out. Paste them into "
+        L += ["", f"Not checked: {', '.join(r['skipped'])}. LinkedIn's PDF leaves them out. Paste them into "
               "templates/linkedin-profile.txt and rerun to score them."]
-    L += ["", "Rubric weights are VWC's, not LinkedIn's. LinkedIn doesn't publish how it ranks profiles."]
+    L += ["", cal.NOTE, "", "Rubric weights are VWC's, not LinkedIn's. LinkedIn doesn't publish how it ranks profiles."]
     return "\n".join(L)
 
 
@@ -207,7 +243,10 @@ def main(argv=None) -> int:
     ap.add_argument("--md")
     a = ap.parse_args(argv)
     try:
-        text = docs.read_text(a.profile, layout=False)  # reading order: the PDF has a sidebar
+        from_pdf = a.profile.lower().endswith(".pdf")
+        text = docs.read_text(a.profile)
+        if from_pdf:
+            text = pdf_columns(text)  # the PDF has a sidebar beside the profile
         record = json.loads(pathlib.Path(a.portfolio).read_text()) if a.portfolio else None
         resume = docs.read_text(a.resume) if a.resume else None
         market = mk.load(a.market, a.onet or (record or {}).get("profile", {}).get("onet_code"))
@@ -217,7 +256,7 @@ def main(argv=None) -> int:
     except (OSError, ValueError, RuntimeError) as e:
         print(f"REFUSED: {e}", file=sys.stderr)
         return 2
-    r = score(text, market, record, resume, from_pdf=a.profile.lower().endswith(".pdf"))
+    r = score(text, market, record, resume, from_pdf=from_pdf)
     md = report_md(r)
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(r, indent=2))

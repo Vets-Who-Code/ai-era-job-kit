@@ -33,6 +33,7 @@ What it does, in the ATS's own order:
      skill a whole occupation uses, so the score asks for the lane's most-wanted ten, not all of them:
      100 means the ten highest-demand skills are all proven. [VWC design judgment, configurable]
      The JSON also carries text_score: the same sum from the resume alone, before outside proof.
+     Both include the kit's 10-point calibration, capped at 100 (jobdata/calibration.py).
      Lift = points gained if that skill were proven.
   5. Flags, reported and not scored: chronology (gaps over 6 months, roles under a year), old keyword
      tricks, and Harvard Extension School format rules.
@@ -55,6 +56,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from jobdata import bls as bls_mod  # noqa: E402
+from jobdata import calibration as cal  # noqa: E402
 from jobdata import demand as dm  # noqa: E402
 from jobdata import docs, lexicon  # noqa: E402
 from jobdata import onet as onet_mod  # noqa: E402
@@ -255,8 +257,8 @@ def corroborate(r: dict, outside: dict[str, list[str]] | None = None) -> dict:
            "detail": f"now {k['grade']}" + (f"; backed by {', '.join(k['backed_by'])}" if k["backed_by"] else ""),
            "weight": k["lift"], "fix": fix(k)}
           for k in sorted(r["skills"], key=lambda x: (-x["lift"], -GRADES[x["grade"]])) if k["lift"] > 0]  # ties: what's already on the resume first
-    r.update(score=round(now_score), checks=base + ev, corroborated=bool(outside),
-             text_score=round(best_n([(k["weight"], GRADES[k["text_grade"]]) for k in r["skills"]], need)))
+    r.update(score=cal.calibrate(now_score), checks=base + ev, corroborated=bool(outside), calibration=cal.CALIBRATION,
+             text_score=cal.calibrate(best_n([(k["weight"], GRADES[k["text_grade"]]) for k in r["skills"]], need)))
     return r
 
 
@@ -286,7 +288,7 @@ def report_md(r: dict) -> str:
         L += ["", "## Be ready to explain (flagged, not scored)", *[f"- {c['flag']}: {c['detail']}. {c['fix']}" for c in r["chronology"]]]
     if r["manipulation"]:
         L += ["", "## Remove these", *[f"- {m['flag']} {m['line']}".rstrip() for m in r["manipulation"]]]
-    L += ["", "Next: score LinkedIn, GitHub and the portfolio, then run the composite. It confirms proven skills from them."]
+    L += ["", cal.NOTE, "", "Next: score LinkedIn, GitHub and the portfolio, then run the composite. It confirms proven skills from them."]
     return "\n".join(L)
 
 

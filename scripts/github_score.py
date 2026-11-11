@@ -10,7 +10,7 @@ needed; `export GITHUB_TOKEN=$(gh auth token)` works) for 5,000 an hour. The dat
       [--portfolio <repo>/portfolio.json] [--json github-score.json] [--md github-score.md]
   (or --onet 15-1252.00 for a live O*NET pull instead of --market)
 
-Pass your pinned repos with --repos. The REST API doesn't list pins, so without it the script reads your
+Pass your pinned repos with --repos (owner/repo for a pin that lives under an organization). The REST API doesn't list pins, so without it the script reads your
 six most recently pushed non-fork repos and says so.
 
 Why these checks (Jerome's rules, the github-scorer skill):
@@ -37,6 +37,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+from jobdata import calibration as cal  # noqa: E402
 from jobdata import lexicon  # noqa: E402
 from jobdata import market as mk  # noqa: E402
 from jobdata.net import FetchError, fetch_json  # noqa: E402
@@ -89,8 +90,10 @@ def score(gh: GitHub, user: str, repos: list[str], market: dict, record: dict | 
     by_name = {r["name"].lower(): r for r in all_repos}
     note = ""
     if repos:
-        picked = [by_name[n.lower()] for n in repos if n.lower() in by_name]
-        lost = [n for n in repos if n.lower() not in by_name]
+        picked, lost = [], []
+        for n in repos:  # "owner/repo" is a pin that lives under an organization
+            r = (gh.try_get(f"/repos/{n}") if "/" in n else None) or by_name.get(n.lower())
+            (picked if r else lost).append(r or n)
         if lost:
             note = f"Not found or not public: {', '.join(lost)}"
     else:
@@ -116,11 +119,12 @@ def score(gh: GitHub, user: str, repos: list[str], market: dict, record: dict | 
     evidence: dict[str, list[str]] = {}
     for r in picked:
         n = r["name"]
-        rd = readme_text(gh, user, n)
-        root = gh.try_get(f"/repos/{user}/{n}/contents/") or []
+        owner = (r.get("owner") or {}).get("login") or user
+        rd = readme_text(gh, owner, n)
+        root = gh.try_get(f"/repos/{owner}/{n}/contents/") or []
         names = [x.get("name", "") for x in root if isinstance(x, dict)]
         has_tests = any(TEST_DIRS.match(x) or TEST_FILES.search(x) for x in names)
-        wf = gh.try_get(f"/repos/{user}/{n}/contents/.github/workflows") if ".github" in names else None
+        wf = gh.try_get(f"/repos/{owner}/{n}/contents/.github/workflows") if ".github" in names else None
         repo_text = [r.get("description") or "", " ".join(r.get("topics") or []), r.get("language") or "", rd]
         corpus += repo_text
         if (r.get("pushed_at") or "") >= active_cut and not r.get("fork"):
@@ -147,7 +151,7 @@ def score(gh: GitHub, user: str, repos: list[str], market: dict, record: dict | 
         unpinned = [a["name"] for a in arts if a["repo"].rstrip("/").split("/")[-1].lower() not in {p["name"].lower() for p in picked}]
         checks.append(C("Lane", "Portfolio artifacts are the pinned repos", not unpinned, ", ".join(unpinned[:4]), 2,
                         f"Pin the repos behind your portfolio artifacts: {', '.join(unpinned[:4])}."))
-    return {"surface": "github", "score": mk.weighted(checks), "checks": checks, "user": user,
+    return {"surface": "github", "score": cal.calibrate(mk.weighted(checks)), "calibration": cal.CALIBRATION, "checks": checks, "user": user,
             "repos": [p["name"] for p in picked], "note": note, "market": market["source"],
             "coverage_top10": round(share, 2), "missing_top10": missing, "api_calls": gh.calls,
             "skill_evidence": evidence, "active_days": active_days}
@@ -163,13 +167,14 @@ def report_md(r: dict) -> str:
     fails = sorted((c for c in r["checks"] if not c["pass"]), key=lambda c: -c["weight"])
     if fails:
         L += ["", "## Fix first", *[f"{i}. {c['fix']}" for i, c in enumerate(fails[:6], 1)]]
+    L += ["", cal.NOTE]
     return "\n".join(L)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--user", required=True)
-    ap.add_argument("--repos", default="", help="comma-separated pinned repo names")
+    ap.add_argument("--repos", default="", help="comma-separated pinned repo names; owner/repo for a pin under an organization")
     ap.add_argument("--market")
     ap.add_argument("--onet")
     ap.add_argument("--portfolio")

@@ -1,6 +1,6 @@
 ---
 name: composite-scorer
-description: "Step 5 of the scoring chain. Combines the resume, LinkedIn, GitHub and portfolio scores into two scores, a machine read (ATS and AI screeners) and a human read (recruiter, hiring manager, engineers), plus a resume gate, with the points left on each surface and the sync check beside them. Use after steps 1 to 4, or when someone asks for their overall score, a scorecard, or which surface to fix first."
+description: "Step 5 of the scoring chain. Combines the resume, LinkedIn, GitHub and portfolio scores into a plain total (the scores added together, out of 100 for each surface scored) and two scores, a machine read (ATS and AI screeners) and a human read (recruiter, hiring manager, engineers), plus a resume gate, with the points left on each surface and the sync check beside them. Use after steps 1 to 4, or when someone asks for their overall score, a scorecard, or which surface to fix first."
 ---
 
 # Composite scorer: two scores and a gate (step 5 of 7)

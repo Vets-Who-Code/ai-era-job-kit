@@ -35,6 +35,7 @@ import urllib.parse
 from html.parser import HTMLParser
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from jobdata import calibration as cal  # noqa: E402
 from jobdata.net import FetchError, fetch  # noqa: E402
 
 
@@ -101,13 +102,13 @@ def check(section, name, ok, detail="", weight=1, fix=""):
 
 
 MIN_WORDS = 40  # fewer words than this in the raw HTML, with scripts on the page, reads as client-rendered
-PROJECT_LINK = re.compile(r"project|case|work|portfolio", re.I)
+PROJECT_LINK = re.compile(r"project|case|work|portfolio|artifact", re.I)  # the kit's own word for them is artifacts
 MAX_PAGES = 5
 
 
 def score(results: list[dict]) -> int:
     tot = sum(r["weight"] for r in results) or 1
-    return round(100 * sum(r["weight"] for r in results if r["pass"]) / tot)
+    return cal.calibrate(100 * sum(r["weight"] for r in results if r["pass"]) / tot)
 
 
 def _loads(url: str) -> bool:
@@ -178,14 +179,14 @@ def audit_site(url: str, record: dict | None = None) -> tuple[list[dict], list[s
             check("Technical Credibility Signals", "All images have alt text",
                   p.imgs == 0 or p.imgs_alt == p.imgs, f"{p.imgs_alt}/{p.imgs}", 2),
             check("Authority & Social Proof", "Links to writing, talks or press",
-                  any(re.search(r"blog|substack|medium|dev\.to|youtube|talk|podcast", l) for l in links), "", 2),
+                  any(re.search(r"blog|substack|medium|dev\.to|youtube|talk|podcast|writing|articles?|posts?\b|press|speaking|newsletter", l) for l in links), "", 2),
             check("Authority & Social Proof", "Testimonials or endorsements",
                   bool(re.search(r"testimonial|recommendation|endorse", text)), "", 1),
             check("Discoverability & Distribution", "Links to LinkedIn", any("linkedin.com" in l for l in links), "", 2),
             check("Discoverability & Distribution", "Resume link",
                   any(re.search(r"resume|\bcv\b|\.pdf", l) for l in links), "", 2),
-            check("Discoverability & Distribution", "Contact path (email or form)",
-                  any(l.startswith("mailto:") for l in links) or p.forms > 0, "", 3),
+            check("Discoverability & Distribution", "Contact path (email, form or contact page)",
+                  any(l.startswith("mailto:") or re.search(r"(?:^|/)contact", l) for l in links) or p.forms > 0, "", 3),
         ]
     else:
         notes.append("The pages are drawn by JavaScript, so this script couldn't read their text or links. "
@@ -272,9 +273,7 @@ def summarize(results: list[dict], notes: list[str] = (), judged: bool = False) 
     sections: dict[str, list[dict]] = {}
     for r in results:
         sections.setdefault(r["section"], []).append(r)
-    tot = sum(r["weight"] for r in results) or 1
-    got = sum(r["weight"] for r in results if r["pass"])
-    L = [f"# Portfolio score (step 4 of the chain{'' if judged else ', automated'}): {round(100 * got / tot)} / 100", "",
+    L = [f"# Portfolio score (step 4 of the chain{'' if judged else ', automated'}): {score(results)} / 100", "",
          "Automated checks plus the checklist pass." if judged else
          "Automated checks only. The portfolio-scorer skill adds the judgment checks: rerun with --checklist.", ""]
     L += [f"Note: {n}" for n in notes] + ([""] if notes else [])
@@ -285,7 +284,8 @@ def summarize(results: list[dict], notes: list[str] = (), judged: bool = False) 
         L.append("")
     fails = sorted((r for r in results if not r["pass"]), key=lambda r: -r["weight"])
     if fails:
-        L += ["## Fix first (highest weight)", *[f"{i}. {r['check']}" for i, r in enumerate(fails[:5], 1)]]
+        L += ["## Fix first (highest weight)", *[f"{i}. {r['check']}" for i, r in enumerate(fails[:5], 1)], ""]
+    L.append(cal.NOTE)
     return "\n".join(L)
 
 
@@ -308,7 +308,7 @@ def main(argv=None) -> int:
         results += audit_github(a.github)
     results += judged
     if a.json:
-        pathlib.Path(a.json).write_text(json.dumps({"surface": "portfolio", "score": score(results), "url": a.url,
+        pathlib.Path(a.json).write_text(json.dumps({"surface": "portfolio", "score": score(results), "calibration": cal.CALIBRATION, "url": a.url,
                                                     "checks": results, "notes": notes,
                                                     "judgment_pass": bool(judged)}, indent=2))
     print(summarize(results, notes, bool(judged)))

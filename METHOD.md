@@ -14,6 +14,8 @@ The bar is the resume-market-scorer in [Vets-Who-Code/hashflag-skills](https://g
 5. **Grading disagreements get measured.** Where a person or an AI grades the Screen Grade, a second grader (the `ats-screener` agent) grades the same posting on its own, and `screen_grade.py agree` reports how far the two agree. The target is the same letter and 90% of qualifications graded the same way [VWC]. Rules get tightened until graders agree; the rule is never bent for one person. Interview answers have no second-grader check yet: the `ai-interviewer` rubric is fixed before the first question, and that is all the kit claims for it.
 6. **Not a hiring prediction.** Employers set their own weights and don't publish them. Every score says what it mirrors and that it is not a promise.
 
+**One declared adjustment.** Every surface score (resume, LinkedIn, GitHub, portfolio) adds a 10-point calibration, capped at 100 `[VWC]`. It stands in for reference material the public kit can't share. It is a fixed number in `scripts/jobdata/calibration.py`, not data, and every report that carries it says so.
+
 ## What we don't use, and why
 
 - **The old seven-dimension resume rubric** (Quantification, Action Verbs, Relevance, Clarity, Impact Statements, ATS Optimization, Harvard Formatting). Six of those dimensions were never tied to a published source, and the scores were model opinions with no formula. Only the Harvard formatting rules had a real source, and those live on as `[HES]` checks.

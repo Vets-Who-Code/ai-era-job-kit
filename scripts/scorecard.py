@@ -19,6 +19,8 @@ Two reads, because two kinds of reader see you in order:
     literally: titles, keywords, dates, structure, match to the posting.
   - Human read (recruiter, hiring manager, engineers): portfolio 35, GitHub 30, resume 20, LinkedIn 15.
     People skim for proof: a live demo, real impact, a clear story, recent commits.
+  - Total: the four surface scores added together, unweighted, out of 100 for each surface scored
+    (400 when all four ran). It shows the whole picture in one number; the two reads show who it's for.
   - Resume gate: a resume that scores under the gate (default 70) on its own text, or that fails the
     parse gate, is flagged whatever either total says. A weak resume means no human ever sees the rest.
     The gate reads text_score (the resume alone), because the gate is about the file a screener parses.
@@ -44,6 +46,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import resume_score  # noqa: E402
+from jobdata import calibration as cal  # noqa: E402
 
 READS = {
     "machine": {"resume": 40, "linkedin": 35, "github": 15, "portfolio": 10},
@@ -133,7 +136,10 @@ def composite(surfaces: dict[str, dict], weights: dict[str, dict] | None = None,
     reads = {k: read_score(surfaces, weights[k]) for k in READS}
     missing = [k for k in ORDER if k not in surfaces]
     blocked = [k for k, v in surfaces.items() if v.get("score") is None]
-    return {"surface": "composite", "machine": reads["machine"], "human": reads["human"],
+    scored = {k: surfaces[k]["score"] for k in ORDER if k in surfaces and surfaces[k].get("score") is not None}
+    # The plain sum: every surface counts the same, no weights. Out of 100 for each surface scored.
+    total = {"score": round(sum(scored.values()), 1), "out_of": 100 * len(scored), "parts": scored}
+    return {"surface": "composite", "total": total, "machine": reads["machine"], "human": reads["human"],
             "gate": resume_gate(surfaces, gate), "partial": bool(missing or blocked), "missing": missing,
             "blocked": blocked, "weights_source": WEIGHTS_SOURCE, "sync": sync, "screens": screens or [],
             "inputs": surfaces}
@@ -202,8 +208,12 @@ def _fmt(x) -> str:
 
 def composite_md(c: dict) -> str:
     part = " (partial)" if c["partial"] else ""
-    L = [f"# Two scores (step 5 of the chain){part}", "",
-         f"- Machine read: {_fmt(c['machine']['score'])} / 100",
+    L = [f"# Two scores (step 5 of the chain){part}", ""]
+    t = c.get("total")
+    if t and t["parts"]:
+        L.append(f"- Total: {_fmt(t['score'])} / {t['out_of']} (" + " + ".join(f"{NAME[k]} {_fmt(v)}" for k, v in t["parts"].items()) + ")"
+                 + (f". Not in the total yet: {', '.join(NAME[k] for k in ORDER if k not in t['parts'])}." if len(t["parts"]) < len(ORDER) else ""))
+    L += [f"- Machine read: {_fmt(c['machine']['score'])} / 100",
          f"- Human read: {_fmt(c['human']['score'])} / 100",
          f"- Resume gate ({c['gate']['threshold']:g}): " + {True: "passed", False: "FLAGGED", None: "unknown"}[c["gate"]["passed"]]
          + f". {c['gate']['note']}", ""]
@@ -220,6 +230,8 @@ def composite_md(c: dict) -> str:
         L.append("  Screen Grades follow the vendors' documented method. They are per posting, so they aren't weighted into either read.")
         L.append("")
     L.append(f"Weights and gate: {c['weights_source']}. Not any employer's; employers don't publish theirs.")
+    L.append(f"Each surface score includes a {cal.CALIBRATION}-point calibration (capped at 100), so the total and both reads carry it too. "
+             "It stands in for reference material the public kit can't share. VWC design judgment.")
     res = (c.get("inputs") or {}).get("resume") or {}
     if any(k in (c.get("inputs") or {}) for k in ("linkedin", "github")):
         L.append("The LinkedIn and GitHub share of the machine read rests on a chat-only claim (references/ats-research.md); "

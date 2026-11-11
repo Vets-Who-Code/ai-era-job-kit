@@ -452,6 +452,14 @@ class TestScoringChain(unittest.TestCase):
         stale = github_score.score(Fake(), "pat", ["rag-eval-harness"], self.market, None, today=dt.date(2028, 6, 1))
         self.assertEqual(stale["skill_evidence"], {})  # no push in a year, no activity proof
         self.assertEqual(r2["repos"], ["rag-eval-harness"])  # forks skipped
+        pages.update({  # a pin that lives under an organization is read from the organization
+            "/repos/acme/platform": {"name": "platform", "owner": {"login": "acme"}, "fork": False, "pushed_at": "2026-10-30T00:00:00Z"},
+            "/repos/acme/platform/readme": {"content": readme},
+            "/repos/acme/platform/contents/": [{"name": "tests"}]})
+        org = github_score.score(Fake(), "pat", ["acme/platform", "acme/gone"], self.market, None, today=dt.date(2026, 11, 6))
+        self.assertEqual(org["repos"], ["platform"])
+        self.assertIn("acme/gone", org["note"])
+        self.assertTrue({c["check"]: c["pass"] for c in org["checks"] if c["section"] == "platform"}["Tests in the repo"])
 
     def test_proven_needs_github_or_linkedin(self):
         import resume_score
@@ -495,6 +503,11 @@ class TestScoringChain(unittest.TestCase):
         cf = scorecard.composite(full)
         self.assertEqual((cf["machine"]["score"], cf["human"]["score"]), (77, 89))
         self.assertFalse(cf["gate"]["passed"])       # high totals don't clear a weak resume
+        self.assertEqual(cf["total"]["out_of"], 400)  # the plain sum: 100 for each surface scored
+        self.assertEqual(cf["total"]["score"], sum(v["score"] for v in full.values()))
+        part = scorecard.composite({"linkedin": s["linkedin"]})
+        self.assertEqual((part["total"]["score"], part["total"]["out_of"]), (s["linkedin"]["score"], 100))
+        self.assertIn("Not in the total yet: Resume", scorecard.composite_md(part))
         w = {"machine": scorecard.parse_weights("resume=75,linkedin=25", "machine"), "human": scorecard.parse_weights(None, "human")}
         self.assertEqual(scorecard.composite(s, w)["machine"]["score"], 65)
         with self.assertRaises(ValueError):
@@ -703,9 +716,9 @@ class TestResumeScoreRules(unittest.TestCase):
         r = rs.score(self.RESUME, rows, [], now=2026, need=2)
         self.assertIsNotNone(r["score"])               # no phone: a fix on the report, not a block
         self.assertIn("Phone", [c["check"] for c in r["checks"] if not c["pass"]])
-        self.assertEqual(r["text_score"], 100)         # two skills proven on paper, two asked for
-        self.assertEqual(r["score"], 70)               # nothing outside backs them yet
-        self.assertEqual(rs.score(self.RESUME, rows, [], now=2026, need=8)["text_score"], 34)
+        self.assertEqual(r["text_score"], 100)         # two skills proven on paper, two asked for (capped at 100)
+        self.assertEqual(r["score"], 80)               # nothing outside backs them yet: 70 measured, plus the calibration
+        self.assertEqual(rs.score(self.RESUME, rows, [], now=2026, need=8)["text_score"], 44)  # 34 measured
         self.assertEqual(rs.best_n([(1, 1.0), (1, 0.7), (1, 0)], None), 100 * 1.7 / 3)
 
     def test_order_is_judged_per_section_and_plural_tests_count(self):
@@ -772,6 +785,27 @@ class TestResumeScoreRules(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     rs.main(base + ["--need", "0"])
         self.assertFalse((ROOT / "leak.md").exists())
+
+    def test_every_surface_score_carries_the_calibration(self):
+        import github_score
+        import linkedin_score
+        import portfolio_audit
+        from jobdata import calibration as cal
+        self.assertEqual((cal.calibrate(0), cal.calibrate(55.4), cal.calibrate(95), cal.calibrate(100)), (10, 65, 100, 100))
+        half = [{"section": "s", "check": "a", "pass": True, "weight": 1, "detail": ""},
+                {"section": "s", "check": "b", "pass": False, "weight": 1, "detail": ""}]
+        self.assertEqual(portfolio_audit.score(half), 60)  # 50 measured
+        self.assertIn("60 / 100", portfolio_audit.summarize(half))
+        self.assertIn("10-point calibration", portfolio_audit.summarize(half))
+        mkt = {"skills": [("Python", 1.0)], "vocab": lexicon.build_vocab(), "source": "test"}
+        li = linkedin_score.score("Headline: Dev\n", mkt)
+        self.assertEqual(li["score"], cal.calibrate(linkedin_score.mk.weighted(li["checks"])))
+        self.assertEqual(li["calibration"], 10)
+        self.assertIn("10-point calibration", linkedin_score.report_md(li))
+        self.assertTrue(hasattr(github_score, "cal"))
+        gated = {"surface": "resume", "score": None, "verdict": "No score", "parse_gate": []}  # no score stays no score
+        import resume_score as rs
+        self.assertIsNone(rs.corroborate(dict(gated))["score"])
 
     def test_gate_reads_the_resume_alone(self):
         import scorecard
@@ -856,9 +890,28 @@ class TestLinkedInParsing(unittest.TestCase):
         mkt = {"skills": [("Python", 1.0)], "vocab": lexicon.build_vocab(), "source": "test"}
         names = lambda r: {c["check"] for c in r["checks"]}
         from_pdf = linkedin_score.score(pdf, mkt, from_pdf=True)
-        self.assertEqual(from_pdf["skipped"], ["Featured", "Open to Work"])
+        self.assertEqual(from_pdf["skipped"][:2], ["Featured", "Open to Work"])
         self.assertNotIn("Featured has links", names(from_pdf))
+        self.assertNotIn("Skills section covers the lane's top 10", names(from_pdf))  # the PDF shows only the top skills
         self.assertIn("Featured has links", names(linkedin_score.score(pdf, mkt)))
+
+
+    def test_pdf_layout_splits_the_sidebar_and_joins_a_wrapped_headline(self):
+        import linkedin_score
+        pad = lambda left, right: f"{left:<39}{right}"
+        layout = "\n".join([
+            "Contact", "jane@example.com", pad("", "Jane Doe"),
+            pad("", "Software Developer | Python, FastAPI | 300+ users,"), pad("www.linkedin.com/in/", "94% uptime | Backend"),
+            pad("jane (LinkedIn)", "Atlanta, Georgia, United States"), "", "Top Skills", pad("", "Summary"),
+            pad("Python", "I build services."), pad("FastAPI", ""), pad("", "Experience"), pad("Certifications", "Example Co"),
+            pad("AWS Certified Developer", "Software Developer"), pad("", "January 2024 - Present"),
+            pad("", "Page 1 of 2"), "\fCut latency 40% with Redis", "Education", "Example University"])
+        s = linkedin_score.split_profile(linkedin_score.pdf_columns(layout))
+        self.assertEqual(s["headline"], "Software Developer | Python, FastAPI | 300+ users, 94% uptime | Backend")
+        self.assertEqual(s["location"], "Atlanta, Georgia, United States")
+        self.assertEqual(s["skills"], "Python\nFastAPI")
+        self.assertEqual(s["certifications"], "AWS Certified Developer")  # the sidebar stays out of Experience
+        self.assertEqual(s["experience"], "Example Co\nSoftware Developer\nJanuary 2024 - Present\nCut latency 40% with Redis")
 
 
 class TestPortfolioAudit(unittest.TestCase):
@@ -892,6 +945,19 @@ class TestPortfolioAudit(unittest.TestCase):
         self.assertFalse(by["rag-eval-harness is on the site"])
         self.assertFalse(by["rag-eval-harness: live link loads"])
         self.assertNotIn("local-toy is on the site", by)
+
+    def test_artifact_pages_writing_and_a_contact_page_count(self):
+        import portfolio_audit
+        home = ('<html lang="en"><head><title>Jane Doe</title></head><body><h1>Jane, developer</h1>'
+                + "<p>" + "I build backend services for logistics teams. " * 10 + "</p>"
+                '<a href="/artifacts/rag-eval-harness/">Deep dive</a><a href="/artifacts/pricing-api/#eval">Deep dive</a>'
+                '<a href="/writing/">Writing</a><a href="/contact/">Contact</a></body></html>')
+        with mock.patch.object(portfolio_audit, "fetch", return_value=home):
+            res, _ = portfolio_audit.audit_site("https://jane.dev")
+        by = {c["check"]: c["pass"] for c in res}
+        self.assertTrue(by["Has project or case-study pages"])
+        self.assertTrue(by["Links to writing, talks or press"])
+        self.assertTrue(by["Contact path (email, form or contact page)"])
 
     def test_checklist_items_need_a_quote(self):
         import portfolio_audit

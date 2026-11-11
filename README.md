@@ -57,9 +57,11 @@ Each step is a skill with a script behind it. Steps 2 to 4 reuse step 1's `resum
 | 2 | `linkedin-scorer` | `linkedin_score.py` | LinkedIn score: headline, location, skills, Featured, About, Experience, resume match |
 | 3 | `github-scorer` | `github_score.py` | GitHub score from the keyless REST API: profile, pinned repos, lane skills |
 | 4 | `portfolio-scorer` | `portfolio_audit.py`, `sync_check.py` | Portfolio score (automated checks plus the checklist pass, and the site checked against `portfolio.json`), and the sync check |
-| 5 | `composite-scorer` | `scorecard.py composite` | Two scores: a machine read (resume 40, LinkedIn 35, GitHub 15, portfolio 10) and a human read (portfolio 35, GitHub 30, resume 20, LinkedIn 15), plus a resume gate at 70 and each posting's Screen Grade beside them |
+| 5 | `composite-scorer` | `scorecard.py composite` | The total (the four scores added together, out of 400), then two scores: a machine read (resume 40, LinkedIn 35, GitHub 15, portfolio 10) and a human read (portfolio 35, GitHub 30, resume 20, LinkedIn 15), plus a resume gate at 70 and each posting's Screen Grade beside them |
 | 6 | `improvement-plan` | `scorecard.py plan` | The steps to improve each section, biggest gain first |
 | 7 | `resume-rebuilder` | `resume_rebuild.py` | Your resume rebuilt to spec from the portfolio, linted, defended, rescored |
+
+Every surface score (resume, LinkedIn, GitHub, portfolio) includes a 10-point calibration, capped at 100. It stands in for reference material the public kit can't share, and each report says so. It is a VWC design judgment, set in `scripts/jobdata/calibration.py`.
 
 The `career-scorecard` agent runs all seven in order. Step 5 gives two scores because two kinds of reader see you in order: machines first, then people. A resume that scores under 70 on its own text is flagged whatever the totals say, since a weak resume means no human sees the rest. The weights and the gate are a VWC design judgment, not research and not any employer's; `--machine-weights`, `--human-weights` and `--gate` change them. The LinkedIn and GitHub share of the machine read rests on a chat-only claim (`references/ats-research.md`), and the report says so. The Screen Grade is the one score modeled on vendor documents; it is per posting, so the composite reports it beside the two reads without a weight.
 
@@ -105,7 +107,7 @@ You need Python 3.10+ and your resume as `.pdf`, `.docx` or `.txt`. Nothing to i
 
 In Claude Code the same thing is one line: `/score-resume ~/job-search/my-resume.pdf "software developer"`.
 
-No skill reaches **proven** until GitHub or LinkedIn backs it, so a first score in the 50s or 60s is normal. The full chain below adds that proof.
+No skill reaches **proven** until GitHub or LinkedIn backs it, so a first score in the 60s or 70s is normal. The full chain below adds that proof.
 
 | If you see | It means | Do this |
 |---|---|---|
