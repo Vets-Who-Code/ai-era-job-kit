@@ -967,3 +967,63 @@ class TestPortfolioAudit(unittest.TestCase):
         with self.assertRaises(ValueError):
             portfolio_audit.checklist_checks([{"section": "First Impression", "item": "Says what you build", "pass": True}])
 
+
+class TestScoreAll(unittest.TestCase):
+    """score_all.py: the chain in one command. The steps are stubbed; each is tested on its own above."""
+
+    def setUp(self):
+        import score_all
+        self.sa = score_all
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.calls: list[tuple[str, list[str]]] = []
+
+    def _step(self, surface, rc=0, score=70):
+        def main(argv):
+            self.calls.append((surface, argv))
+            if not rc:
+                pathlib.Path(argv[argv.index("--json") + 1]).write_text(json.dumps(
+                    {"surface": surface, "score": score, "checks": [], "skill_evidence": {}}))
+            return rc
+        return main
+
+    def _run(self, argv, **rcs):
+        sa = self.sa
+        with mock.patch.object(sa.resume_score, "main", self._step("resume", rcs.get("resume", 0))), \
+                mock.patch.object(sa.linkedin_score, "main", self._step("linkedin", rcs.get("linkedin", 0))), \
+                mock.patch.object(sa.github_score, "main", self._step("github", rcs.get("github", 0))), \
+                mock.patch.object(sa.portfolio_audit, "main", self._step("portfolio", rcs.get("portfolio", 0))), \
+                mock.patch.object(sa.resume_score, "corroborate", side_effect=lambda r, _: r), \
+                mock.patch.object(sa.resume_score, "report_md", return_value="resume report"):
+            return sa.main(["--dir", str(self.tmp), *argv])
+
+    def test_one_command_runs_the_chain_and_remembers_the_answers(self):
+        first = ["--resume", "me.pdf", "--role", "software developer", "--linkedin", "Profile.pdf",
+                 "--github", "me", "--repos", "a,org/b", "--url", "https://me.dev"]
+        self.assertEqual(self._run(first), 0)
+        self.assertEqual([c[0] for c in self.calls], ["resume", "linkedin", "github", "portfolio"])
+        total = json.loads((self.tmp / "composite.json").read_text())["total"]
+        self.assertEqual((total["score"], total["out_of"]), (280, 400))
+        self.assertTrue((self.tmp / "plan.md").exists())
+        self.calls.clear()
+        self.assertEqual(self._run([]), 0)  # no flags the second time
+        self.assertEqual([c[0] for c in self.calls], ["resume", "linkedin", "github", "portfolio"])
+        self.assertIn("a,org/b", dict(self.calls)["github"])
+
+    def test_a_surface_that_fails_is_left_out_not_read_from_an_old_file(self):
+        (self.tmp / "github-score.json").write_text(json.dumps({"surface": "github", "score": 99, "checks": []}))
+        rc = self._run(["--resume", "me.pdf", "--onet", "15-1252.00", "--github", "me"], github=3)
+        self.assertEqual(rc, 3)
+        total = json.loads((self.tmp / "composite.json").read_text())["total"]
+        self.assertEqual((total["score"], total["out_of"]), (70, 100))
+
+    def test_stops_when_the_resume_cant_be_scored(self):
+        self.assertEqual(self._run(["--resume", "me.pdf", "--role", "x", "--github", "me"], resume=3), 3)
+        self.assertEqual([c[0] for c in self.calls], ["resume"])
+        self.assertFalse((self.tmp / "composite.json").exists())
+
+    def test_refuses_a_folder_in_git_and_a_first_run_without_a_resume(self):
+        self.assertEqual(self._run([]), 2)
+        subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
+        self.assertEqual(self._run(["--resume", "me.pdf", "--role", "x"]), 2)
+        self.assertEqual(self.calls, [])
+        self.assertFalse((self.tmp / "score-all.json").exists())

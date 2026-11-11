@@ -117,6 +117,23 @@ No skill reaches **proven** until GitHub or LinkedIn backs it, so a first score 
 | `STOPPED: ...` | O*NET or BLS couldn't be reached | Check your connection and rerun; the kit never guesses numbers |
 | The lane title is wrong | `--role` matched a different occupation | Pass the exact code with `--onet` |
 
+## One command: the whole chain
+
+Once the resume scores, run steps 1 to 6 together. From your work folder:
+
+```
+python3 $KIT/scripts/score_all.py --resume my-resume.pdf --role "software developer" \
+    --linkedin Profile.pdf --github yourhandle --repos repo-a,owner/repo-b --url https://yourname.dev
+```
+
+- `--linkedin` is your profile saved from LinkedIn (More → Save to PDF) or pasted into `templates/linkedin-profile.txt`. The kit never logs in to LinkedIn.
+- `--repos` are your pinned repos. Write `owner/repo` for a pin that lives under an organization.
+- Leave out any surface you don't have yet. The report says the scores are partial.
+
+It prints one line per surface, then the combined report: the total, the machine read, the human read and the resume gate. Every report is saved in the folder, and `plan.md` lists what to fix first.
+
+**After the first run it's just `python3 $KIT/scripts/score_all.py`.** Your answers are saved to `score-all.json` in the folder; pass a flag again to change one. If a live pull fails, that surface is left out and named at the end. An older score is never used in its place. On a shared network, `export GITHUB_TOKEN=$(gh auth token)` first so GitHub's hourly limit doesn't stop you.
+
 ## Quick start: the full chain (in order)
 
 Run these from your work folder (`~/job-search` above), with `scripts/` standing for `$KIT/scripts/`. The score files quote your resume, so they stay outside git too.
